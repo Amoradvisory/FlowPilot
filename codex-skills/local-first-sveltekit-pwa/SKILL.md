@@ -41,7 +41,15 @@ Use this skill when the app must feel instant locally, keep working offline, and
 - smoke test key flows with Playwright CLI
 - confirm the browser console is clean
 
-6. Use a device-safe testing loop.
+6. Close the auth and release loop before calling sync done.
+- Set Supabase `Site URL` to the deployed app URL.
+- Add redirect URLs for both production and local dev.
+- For Google auth, create a Google Auth Platform web client.
+- Use the Supabase callback URL as the Google redirect URI.
+- If Google OAuth is in test mode, add the real user email as a test user.
+- Test the whole sign-in flow until it returns through `/auth/callback` and lands inside the app.
+
+7. Use a device-safe testing loop.
 - For LAN testing, run `npm run dev -- --host 0.0.0.0 --port 4173`.
 - The phone can open the LAN IP only while the PC stays on.
 - For real sync across devices, deploy a public URL and sign into Supabase on both devices.
@@ -55,9 +63,11 @@ Use this skill when the app must feel instant locally, keep working offline, and
 ## Windows and Deployment Notes
 
 - For a pure client app, `adapter-static` plus a simple Vercel rewrite can be the least fragile path.
+- If Vercel serves the wrong artifact for a static SvelteKit build, point `outputDirectory` at `build`.
 - If the project lives under a giant parent Git worktree, initialize a nested repository at the project root before committing.
 - Run the dev server on `0.0.0.0` when testing from Android on the same Wi-Fi.
 
 ## References
 
 - Read [references/windows-and-sync.md](references/windows-and-sync.md) when Windows build quirks, Dexie behavior, phone testing, or release hardening become the bottleneck.
+- Read [references/google-oauth-and-release.md](references/google-oauth-and-release.md) when Supabase auth, Google sign-in, Vercel deployment, or public release becomes the bottleneck.

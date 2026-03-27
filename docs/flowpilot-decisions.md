@@ -53,6 +53,18 @@ The app initially risked showing sync intent even when no backend was configured
 
 The reusable know-how from this build was extracted into the `local-first-sveltekit-pwa` Codex skill so future work can start from the same delivery pattern.
 
+### Auth and release closure
+
+The app did not become truly usable across devices until the release loop was closed:
+
+- public Vercel URL
+- Supabase URL configuration
+- Google Auth Platform web client
+- Supabase Google provider activation
+- real end-to-end sign-in test on the deployed app
+
+That sequence is now part of the reusable skill instead of living only in chat history.
+
 ## What Unlocks True Cross-Device Sync
 
 To get real phone-to-PC sync:
@@ -62,6 +74,29 @@ To get real phone-to-PC sync:
 3. set the Supabase keys in `.env`
 4. deploy the app to a public URL
 5. sign in with the same account on both devices
+
+## Google OAuth Pattern That Worked
+
+For this version, the reliable pattern was:
+
+1. create the Google OAuth client after the production URL exists
+2. use the Supabase callback URL as the Google redirect URI
+3. register both production and localhost origins
+4. if Google OAuth stays in `Test`, add the real user email as a test user
+5. enable Google in Supabase and test from the deployed app, not only localhost
+
+This is a reusable delivery shortcut for future single-user apps.
+
+## Reusable Acceleration
+
+The next app of the same family can start faster by reusing:
+
+- the `local-first-sveltekit-pwa` skill
+- the SQL schema pattern with `version` fields
+- the static SvelteKit plus Vercel deployment pattern
+- the Supabase URL configuration pattern
+- the Google OAuth checklist
+- the validation loop: typecheck, build, deployed auth test, cross-device sync test
 
 ## Preservation
 
