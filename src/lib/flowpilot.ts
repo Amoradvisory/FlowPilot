@@ -321,7 +321,9 @@ class FlowPilotController {
 			const demoUser: SessionIdentity = {
 				id: DEMO_USER_ID,
 				email: null,
-				displayName: 'Local mode'
+				displayName: 'Local mode',
+				avatarUrl: null,
+				provider: 'email'
 			};
 			authState.set({
 				ready: true,
@@ -425,7 +427,17 @@ class FlowPilotController {
 					? session.user.user_metadata.full_name
 					: typeof session.user.user_metadata?.name === 'string'
 						? session.user.user_metadata.name
-						: null
+						: null,
+			avatarUrl:
+				typeof session.user.user_metadata?.avatar_url === 'string'
+					? session.user.user_metadata.avatar_url
+					: typeof session.user.user_metadata?.picture === 'string'
+						? session.user.user_metadata.picture
+						: null,
+			provider:
+				typeof session.user.app_metadata?.provider === 'string'
+					? session.user.app_metadata.provider
+					: null
 		};
 
 		authState.set({

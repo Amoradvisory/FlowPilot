@@ -225,6 +225,8 @@ export interface SessionIdentity {
 	id: string;
 	email: string | null;
 	displayName: string | null;
+	avatarUrl: string | null;
+	provider: string | null;
 }
 
 export interface AuthState {

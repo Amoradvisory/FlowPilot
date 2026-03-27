@@ -2,6 +2,7 @@
 	import './layout.css';
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
+	import AccountBadge from '$lib/components/AccountBadge.svelte';
 	import favicon from '$lib/assets/favicon.svg';
 	import AuthGate from '$lib/components/AuthGate.svelte';
 	import QuickCaptureModal from '$lib/components/QuickCaptureModal.svelte';
@@ -43,6 +44,15 @@
 				<h1 class="mt-2 text-2xl font-semibold text-white">Cockpit</h1>
 				<p class="mt-2 text-sm text-zinc-500">Inbox -> clarifier -> planifier -> focus -> revue.</p>
 			</div>
+
+			{#if $authState.user}
+				<a
+					class="mb-6 block rounded-3xl border border-white/8 bg-[#111] p-4 transition hover:border-white/12 hover:bg-white/[0.03]"
+					href="/settings"
+				>
+					<AccountBadge user={$authState.user} />
+				</a>
+			{/if}
 
 			<nav class="space-y-2">
 				{#each NAV_ITEMS as item}
@@ -97,6 +107,15 @@
 				</div>
 
 				<div class="flex items-center gap-2">
+					{#if $authState.user}
+						<a
+							class="rounded-full border border-white/10 bg-[#111] px-2 py-1.5 transition hover:border-white/20"
+							href="/settings"
+							aria-label="Voir le compte connecte"
+						>
+							<AccountBadge user={$authState.user} compact />
+						</a>
+					{/if}
 					<a class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300" href="/inbox">
 						Inbox {$pendingInboxItems.length}
 					</a>

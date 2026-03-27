@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AccountBadge from '$lib/components/AccountBadge.svelte';
 	import Card from '$lib/components/Card.svelte';
 	import { REVIEW_DAY_OPTIONS } from '$lib/constants';
 	import { authState, conflictLogs, flowpilot, profile, syncState } from '$lib/flowpilot';
@@ -48,6 +49,24 @@
 	</Card>
 
 	<div class="grid gap-4 xl:grid-cols-2">
+		{#if $authState.user}
+			<Card>
+				<div class="space-y-4">
+					<h2 class="text-xl font-semibold text-white">Compte connecte</h2>
+					<AccountBadge user={$authState.user} />
+					<div class="rounded-2xl border border-white/6 bg-black/20 px-4 py-3 text-sm text-zinc-300">
+						<p>
+							Compte actif:
+							<span class="font-medium text-white">{$authState.user.email ?? 'adresse inconnue'}</span>
+						</p>
+						<p class="mt-2 text-xs text-zinc-500">
+							Verifie ici le compte avant de tester la synchronisation entre PC et Android.
+						</p>
+					</div>
+				</div>
+			</Card>
+		{/if}
+
 		<Card>
 			<div class="space-y-4">
 				<h2 class="text-xl font-semibold text-white">Profil</h2>
