@@ -254,5 +254,13 @@ create trigger on_auth_user_created
 after insert on auth.users
 for each row execute procedure public.handle_new_user();
 
--- Optional but recommended for instant cross-device updates:
--- alter publication supabase_realtime add table public.profiles, public.inbox_items, public.projects, public.tasks, public.subtasks, public.notes, public.habits, public.habit_completions, public.focus_sessions, public.reviews;
+do $$
+begin
+  begin
+    alter publication supabase_realtime add table public.profiles, public.inbox_items, public.projects, public.tasks, public.subtasks, public.notes, public.habits, public.habit_completions, public.focus_sessions, public.reviews;
+  exception
+    when duplicate_object then
+      null;
+  end;
+end;
+$$;
