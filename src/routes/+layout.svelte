@@ -1,8 +1,11 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import './layout.css';
 	import { onMount } from 'svelte';
-	import { page } from '$app/stores';
 	import AccountBadge from '$lib/components/AccountBadge.svelte';
+	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import favicon from '$lib/assets/favicon.svg';
 	import AuthGate from '$lib/components/AuthGate.svelte';
 	import { NAV_ITEMS, SECONDARY_ITEMS } from '$lib/constants';
@@ -17,19 +20,83 @@
 	} from '$lib/flowpilot';
 
 	let { children } = $props();
+	type DensityMode = 'compact' | 'cozy' | 'airy';
+
+	let commandPaletteOpen = $state(false);
+	let densityMode = $state<DensityMode>('cozy');
+
+	const applyDensityMode = (mode: DensityMode) => {
+		densityMode = mode;
+		if (!browser) return;
+		document.documentElement.dataset.density = mode;
+		localStorage.setItem('nexus-density', mode);
+	};
+
+	const cycleDensity = () => {
+		const order: DensityMode[] = ['compact', 'cozy', 'airy'];
+		const nextIndex = (order.indexOf(densityMode) + 1) % order.length;
+		applyDensityMode(order[nextIndex]);
+	};
 
 	onMount(() => {
+		if (browser) {
+			const storedDensity = localStorage.getItem('nexus-density');
+			if (storedDensity === 'compact' || storedDensity === 'cozy' || storedDensity === 'airy') {
+				applyDensityMode(storedDensity);
+			} else {
+				document.documentElement.dataset.density = densityMode;
+			}
+		}
+
+		const isEditableTarget = (target: EventTarget | null) =>
+			target instanceof HTMLElement &&
+			(target.tagName === 'INPUT' ||
+				target.tagName === 'TEXTAREA' ||
+				target.tagName === 'SELECT' ||
+				target.isContentEditable);
+
+		const handleKeydown = (event: KeyboardEvent) => {
+			if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+				if (isEditableTarget(event.target)) return;
+				event.preventDefault();
+				commandPaletteOpen = true;
+				return;
+			}
+
+			if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'n') {
+				if (isEditableTarget(event.target)) return;
+				event.preventDefault();
+				void goto('/vault?new=1&focus=title');
+				return;
+			}
+
+			if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') {
+				if (isEditableTarget(event.target)) return;
+				event.preventDefault();
+				cycleDensity();
+				return;
+			}
+
+			if (event.key === 'Escape' && commandPaletteOpen) {
+				commandPaletteOpen = false;
+			}
+		};
+
+		window.addEventListener('keydown', handleKeydown);
 		void flowpilot.init();
-		return () => flowpilot.destroy();
+		return () => {
+			window.removeEventListener('keydown', handleKeydown);
+			flowpilot.destroy();
+		};
 	});
 
 	const isActive = (href: string) =>
-		href === '/' ? $page.url.pathname === '/' : $page.url.pathname.startsWith(href);
+		href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href);
 	const pageLabel = () =>
-		$page.url.pathname === '/'
+		page.url.pathname === '/'
 			? 'Accueil'
 			: ([...NAV_ITEMS, ...SECONDARY_ITEMS].find((item) => isActive(item.href))?.label ??
-				$page.url.pathname.slice(1));
+				page.url.pathname.slice(1));
 	const noteCount = $derived(
 		$notes.filter((note) => !note.deleted_at && getVaultMeta(note).kind === 'note').length
 	);
@@ -146,6 +213,20 @@
 					<button
 						class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300 transition hover:border-white/20 hover:text-white"
 						type="button"
+						onclick={() => (commandPaletteOpen = true)}
+					>
+						Ctrl+K
+					</button>
+					<button
+						class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300 transition hover:border-white/20 hover:text-white"
+						type="button"
+						onclick={cycleDensity}
+					>
+						Densite {densityMode}
+					</button>
+					<button
+						class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300 transition hover:border-white/20 hover:text-white"
+						type="button"
 						onclick={() => flowpilot.syncNow()}
 					>
 						Sync
@@ -234,6 +315,8 @@
 					</div>
 				{/each}
 			</div>
+
+			<CommandPalette open={commandPaletteOpen} onClose={() => (commandPaletteOpen = false)} />
 		</div>
 	</div>
 {/if}

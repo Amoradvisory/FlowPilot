@@ -1,8 +1,22 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+	import { tick } from 'svelte';
 	import Card from '$lib/components/Card.svelte';
+	import NoteContentRenderer from '$lib/components/NoteContentRenderer.svelte';
 	import { flowpilot, notes } from '$lib/flowpilot';
-	import { findRelatedNotes, matchesNoteQuery, type NoteIndexItem } from '$lib/nexus-notes';
+	import {
+		computeNoteVelocity,
+		findRelatedNotes,
+		matchesNoteQuery,
+		type NoteIndexItem
+	} from '$lib/nexus-notes';
+	import {
+		buildTemplateDraft,
+		NOTE_TEMPLATES,
+		type NoteTemplateId
+	} from '$lib/nexus-note-templates';
 	import {
 		buildVaultTags,
 		getDecayMeta,
@@ -41,6 +55,7 @@
 		document: VaultDocument;
 		colors: ReturnType<typeof noteColorClasses>;
 	};
+	type EditorFocusTarget = 'search' | 'title' | 'content';
 
 	const MAX_EMBED_FILE_BYTES = 5 * 1024 * 1024;
 
@@ -63,7 +78,11 @@
 	let attachmentKind = $state<VaultAttachmentKind>('link');
 	let mediaMessage = $state<string | null>(null);
 	let mediaMessageTone = $state<'error' | 'info'>('info');
-	let fileInput: HTMLInputElement | null = null;
+	let fileInput = $state<HTMLInputElement | null>(null);
+	let searchInput = $state<HTMLInputElement | null>(null);
+	let titleInput = $state<HTMLInputElement | null>(null);
+	let contentTextarea = $state<HTMLTextAreaElement | null>(null);
+	let handledRouteQuery = $state('');
 
 	const vaultItems = $derived(
 		$notes
@@ -105,9 +124,20 @@
 	const mediaNoteCount = $derived(
 		vaultItems.filter((item: VaultItem) => item.document.attachments.length > 0).length
 	);
+	const velocity = $derived(computeNoteVelocity(vaultItems));
 	const relatedNoteMap = $derived.by(
 		() => new Map(vaultItems.map((item) => [item.note.id, findRelatedNotes(item, vaultItems, 3)]))
 	);
+	const templateContext = $derived({
+		now: new Date(),
+		similarTitles: (search.trim() ? filteredItems : vaultItems)
+			.filter((item: VaultItem) => item.note.id !== editingId)
+			.map((item: VaultItem) => item.note.title)
+			.slice(0, 3),
+		hotTag: velocity.hotTag,
+		todayCount: velocity.createdToday,
+		weekCount: velocity.createdThisWeek
+	});
 
 	const setMediaMessage = (message: string | null, tone: 'error' | 'info' = 'info') => {
 		mediaMessage = message;
@@ -146,6 +176,25 @@
 		setMediaMessage(null);
 	};
 
+	const focusEditorTarget = async (target: EditorFocusTarget = 'title') => {
+		await tick();
+		if (target === 'search') {
+			searchInput?.focus();
+			searchInput?.select();
+			return;
+		}
+		if (target === 'content') {
+			contentTextarea?.focus();
+			contentTextarea?.setSelectionRange(content.length, content.length);
+			return;
+		}
+		titleInput?.focus();
+		titleInput?.select();
+	};
+
+	const parseFocusTarget = (value: string | null): EditorFocusTarget =>
+		value === 'search' || value === 'content' || value === 'title' ? value : 'title';
+
 	const startEdit = (id: string) => {
 		const current = vaultItems.find((item: VaultItem) => item.note.id === id);
 		if (!current) return;
@@ -162,6 +211,26 @@
 		attachmentTitle = '';
 		attachmentKind = 'link';
 		setMediaMessage(null);
+	};
+
+	const applyTemplate = async (templateId: NoteTemplateId) => {
+		const draft = buildTemplateDraft(templateId, templateContext);
+		editingId = null;
+		title = draft.title;
+		content = draft.content;
+		color = draft.color;
+		priority = draft.priority;
+		lifeState = draft.lifeState;
+		tagInput = draft.tags.join(', ');
+		pinned = false;
+		attachments = [];
+		attachmentUrl = '';
+		attachmentTitle = '';
+		attachmentKind = 'link';
+		setMediaMessage(
+			`Template ${NOTE_TEMPLATES.find((template) => template.id === templateId)?.label ?? 'charge'} applique.`
+		);
+		await focusEditorTarget(templateId === 'meeting' ? 'title' : 'content');
 	};
 
 	const addLinkAttachment = () => {
@@ -326,6 +395,49 @@
 			if (copyMessage === id) copyMessage = null;
 		}, 1600);
 	};
+
+	$effect(() => {
+		if (page.url.pathname !== '/vault') return;
+
+		const params = page.url.searchParams;
+		const query = params.toString();
+		if (!query) {
+			handledRouteQuery = '';
+			return;
+		}
+
+		const routeToken = `${page.url.pathname}?${query}`;
+		if (handledRouteQuery === routeToken) return;
+		handledRouteQuery = routeToken;
+
+		void (async () => {
+			const focusTarget = parseFocusTarget(params.get('focus'));
+			const editId = params.get('edit');
+			const templateId = params.get('template') as NoteTemplateId | null;
+			const shouldReset = params.get('new') === '1';
+
+			if (editId) {
+				startEdit(editId);
+				await focusEditorTarget(focusTarget === 'search' ? 'title' : focusTarget);
+			} else if (templateId && NOTE_TEMPLATES.some((template) => template.id === templateId)) {
+				await applyTemplate(templateId);
+				if (focusTarget !== 'content') {
+					await focusEditorTarget(focusTarget);
+				}
+			} else if (shouldReset) {
+				resetForm();
+				await focusEditorTarget(focusTarget);
+			} else {
+				await focusEditorTarget(focusTarget);
+			}
+
+			await goto('/vault', {
+				replaceState: true,
+				noScroll: true,
+				keepFocus: true
+			});
+		})();
+	});
 </script>
 
 <div class="space-y-4">
@@ -384,10 +496,53 @@
 
 			<div class="mt-4 space-y-4">
 				<input
+					bind:this={titleInput}
 					class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white transition outline-none focus:border-[#00D4FF]/40"
 					placeholder="Titre"
 					bind:value={title}
 				/>
+
+				<div class="rounded-3xl border border-white/8 bg-black/15 p-4">
+					<div class="flex items-start justify-between gap-4">
+						<div>
+							<p class="text-xs tracking-[0.2em] text-zinc-500 uppercase">Templates intelligents</p>
+							<p class="mt-2 text-sm text-zinc-400">
+								Des bases solides pour reunion, bug, idee produit ou revue. Remplissage partiel avec
+								le contexte de tes notes.
+							</p>
+						</div>
+						<button
+							class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300"
+							type="button"
+							onclick={() => void focusEditorTarget('content')}
+						>
+							Ctrl+Shift+N
+						</button>
+					</div>
+					<div class="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+						{#each NOTE_TEMPLATES as template}
+							{@const templatePriority = NOTE_PRIORITY_OPTIONS.find(
+								(option) => option.value === template.priority
+							)}
+							<button
+								class="rounded-2xl border border-white/8 bg-black/20 px-4 py-3 text-left transition hover:border-white/16"
+								type="button"
+								onclick={() => void applyTemplate(template.id)}
+							>
+								<div class="flex items-center justify-between gap-3">
+									<p class="text-sm font-medium text-white">{template.label}</p>
+									<span
+										class="rounded-full border px-2 py-0.5 text-[11px]"
+										style={`border-color: ${templatePriority?.accent ?? '#8fcaff'}44; background: ${templatePriority?.accent ?? '#8fcaff'}18; color: ${templatePriority?.accent ?? '#8fcaff'};`}
+									>
+										{template.priority.toUpperCase()}
+									</span>
+								</div>
+								<p class="mt-2 text-sm text-zinc-400">{template.description}</p>
+							</button>
+						{/each}
+					</div>
+				</div>
 
 				<div>
 					<p class="mb-2 text-xs tracking-[0.2em] text-zinc-500 uppercase">Couleur</p>
@@ -541,10 +696,24 @@
 				</div>
 
 				<textarea
+					bind:this={contentTextarea}
 					class="min-h-[240px] w-full rounded-3xl border border-white/10 bg-black/20 px-4 py-4 text-sm leading-6 text-white transition outline-none focus:border-[#00D4FF]/40"
 					placeholder="Contenu de la note, commentaire de photo, memo ou idee detaillee"
 					bind:value={content}
 				></textarea>
+
+				<div
+					class="rounded-3xl border border-white/8 bg-[linear-gradient(135deg,rgba(0,212,255,0.08),transparent_58%),rgba(255,255,255,0.01)] p-4"
+				>
+					<p class="text-xs tracking-[0.2em] text-zinc-500 uppercase">Apercu vivant</p>
+					<p class="mt-2 text-sm text-zinc-400">
+						Checklists, citations, formules, tableaux et blocs de code prennent forme avant meme
+						l'enregistrement.
+					</p>
+					<div class="mt-4 rounded-2xl border border-white/8 bg-black/20 p-4">
+						<NoteContentRenderer text={content} />
+					</div>
+				</div>
 
 				<label
 					class="flex items-center gap-3 rounded-2xl border border-white/8 bg-black/20 px-4 py-3 text-sm text-zinc-300"
@@ -576,6 +745,7 @@
 			<Card class="bg-[#111]">
 				<div class="flex flex-col gap-3">
 					<input
+						bind:this={searchInput}
 						class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white transition outline-none focus:border-[#00D4FF]/40"
 						placeholder="Recherche globale: budget, tag:client-x, priority:p1, state:seed, media:yes"
 						bind:value={search}
@@ -694,9 +864,9 @@
 							<h2 class="mt-4 text-xl font-semibold text-white">{item.note.title}</h2>
 
 							{#if item.document.plainText}
-								<pre
-									class="mt-4 max-h-56 overflow-auto rounded-2xl border border-white/6 bg-black/25 px-4 py-3 font-sans text-sm leading-6 whitespace-pre-wrap text-zinc-200">{item
-										.document.plainText}</pre>
+								<div class="mt-4 rounded-2xl border border-white/6 bg-black/25 p-4">
+									<NoteContentRenderer text={item.document.plainText} compact />
+								</div>
 							{:else if !item.document.attachments.length}
 								<p class="mt-4 text-sm text-zinc-500">Contenu vide.</p>
 							{/if}

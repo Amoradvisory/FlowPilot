@@ -14,25 +14,40 @@
 	--warning: #ffb800;
 	--danger: #ff2d55;
 	--glass-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+	--density-font-size: 16px;
+	--density-line-height: 1.5;
 }
 
 html,
 body {
 	min-height: 100%;
+	font-size: var(--density-font-size);
+	line-height: var(--density-line-height);
 	background:
 		radial-gradient(circle at top, rgba(0, 212, 255, 0.16), transparent 28%),
 		radial-gradient(circle at right top, rgba(123, 47, 255, 0.14), transparent 24%),
 		linear-gradient(180deg, #0b1020 0%, #090d18 100%);
 	color: var(--text);
-	font-family:
-		Inter,
-		ui-sans-serif,
-		system-ui,
-		sans-serif;
+	font-family: Inter, ui-sans-serif, system-ui, sans-serif;
 }
 
 body {
 	margin: 0;
+}
+
+html[data-density='compact'] {
+	--density-font-size: 14px;
+	--density-line-height: 1.42;
+}
+
+html[data-density='cozy'] {
+	--density-font-size: 16px;
+	--density-line-height: 1.5;
+}
+
+html[data-density='airy'] {
+	--density-font-size: 18px;
+	--density-line-height: 1.62;
 }
 
 * {
@@ -43,12 +58,7 @@ code,
 pre,
 kbd,
 samp {
-	font-family:
-		'JetBrains Mono',
-		'Fira Code',
-		ui-monospace,
-		SFMono-Regular,
-		monospace;
+	font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, monospace;
 }
 
 a {
