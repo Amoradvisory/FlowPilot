@@ -1,6 +1,7 @@
-	<script lang="ts">
+<script lang="ts">
 	import Card from '$lib/components/Card.svelte';
 	import { activeProjects, flowpilot, notes, projectProgress, tasks } from '$lib/flowpilot';
+	import { summarizeVaultContent } from '$lib/vault-document';
 
 	let title = $state('');
 	let description = $state('');
@@ -50,6 +51,8 @@
 		});
 		standaloneNote = '';
 	};
+
+	const notePreview = (value: string | null) => summarizeVaultContent(value, 120);
 </script>
 
 <div class="space-y-4">
@@ -148,7 +151,7 @@
 							<div class="flex items-start justify-between gap-3">
 								<div>
 									<p class="font-medium text-white">{note.title}</p>
-									<p class="mt-1 text-sm text-zinc-400">{note.content ?? 'Note vide'}</p>
+									<p class="mt-1 text-sm text-zinc-400">{notePreview(note.content)}</p>
 								</div>
 								<button class="rounded-full border border-red-500/20 px-2 py-1 text-xs text-red-300" type="button" onclick={() => flowpilot.deleteNote(note.id)}>
 									x
@@ -180,7 +183,7 @@
 						<div class="flex items-start justify-between gap-3">
 							<div>
 								<p class="font-medium text-white">{note.title}</p>
-								<p class="mt-1 text-sm text-zinc-400">{note.content ?? 'Note vide'}</p>
+								<p class="mt-1 text-sm text-zinc-400">{notePreview(note.content)}</p>
 							</div>
 							<button class="rounded-full border border-red-500/20 px-2 py-1 text-xs text-red-300" type="button" onclick={() => flowpilot.deleteNote(note.id)}>
 								x

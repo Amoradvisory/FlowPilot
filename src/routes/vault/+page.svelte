@@ -18,13 +18,29 @@
 		type VaultKind,
 		vaultKindLabel
 	} from '$lib/note-vault';
+	import {
+		buildCopyableVaultText,
+		buildVaultContent,
+		detectAttachmentKindFromUrl,
+		isAudioAttachment,
+		isImageAttachment,
+		isVideoAttachment,
+		parseVaultContent,
+		type VaultAttachment,
+		type VaultAttachmentKind,
+		type VaultDocument,
+		vaultAttachmentKindLabel
+	} from '$lib/vault-document';
 
 	type VaultItem = {
 		note: Note;
 		meta: VaultMeta;
 		project: Project | null;
+		document: VaultDocument;
 		colors: ReturnType<typeof noteColorClasses>;
 	};
+
+	const MAX_EMBED_FILE_BYTES = 5 * 1024 * 1024;
 
 	let search = $state('');
 	let kindFilter = $state<'all' | VaultKind>('all');
@@ -40,16 +56,25 @@
 	let projectId = $state('');
 	let pinned = $state(false);
 	let copyMessage = $state<string | null>(null);
+	let attachments = $state<VaultAttachment[]>([]);
+	let attachmentUrl = $state('');
+	let attachmentTitle = $state('');
+	let attachmentKind = $state<VaultAttachmentKind>('link');
+	let mediaMessage = $state<string | null>(null);
+	let mediaMessageTone = $state<'error' | 'info'>('info');
+	let fileInput: HTMLInputElement | null = null;
 
 	const vaultItems = $derived(
 		$notes
 			.filter((note) => !note.deleted_at)
 			.map((note): VaultItem => {
 				const meta = getVaultMeta(note);
+				const document = parseVaultContent(note.content);
 				return {
 					note,
 					meta,
 					project: $projects.find((project) => project.id === note.project_id) ?? null,
+					document,
 					colors: noteColorClasses(meta.color)
 				};
 			})
@@ -79,6 +104,27 @@
 		vaultItems.filter((item: VaultItem) => item.meta.kind === 'reference').length
 	);
 
+	const setMediaMessage = (message: string | null, tone: 'error' | 'info' = 'info') => {
+		mediaMessage = message;
+		mediaMessageTone = tone;
+	};
+
+	const formatBytes = (value: number | null) => {
+		if (!value) return null;
+		return value >= 1024 * 1024
+			? `${(value / (1024 * 1024)).toFixed(1)} Mo`
+			: `${Math.max(1, Math.round(value / 1024))} Ko`;
+	};
+
+	const attachmentFallbackTitle = (url: string, kind: VaultAttachmentKind) => {
+		try {
+			const parsed = new URL(url);
+			return parsed.hostname.replace(/^www\./, '') || vaultAttachmentKindLabel(kind);
+		} catch {
+			return vaultAttachmentKindLabel(kind);
+		}
+	};
+
 	const resetForm = () => {
 		editingId = null;
 		title = '';
@@ -89,6 +135,11 @@
 		tagInput = '';
 		projectId = '';
 		pinned = false;
+		attachments = [];
+		attachmentUrl = '';
+		attachmentTitle = '';
+		attachmentKind = 'link';
+		setMediaMessage(null);
 	};
 
 	const loadTemplate = (templateId: string) => {
@@ -103,6 +154,8 @@
 		tagInput = '';
 		projectId = '';
 		pinned = template.kind !== 'snippet';
+		attachments = [];
+		setMediaMessage(null);
 	};
 
 	const startEdit = (id: string) => {
@@ -110,24 +163,112 @@
 		if (!current) return;
 		editingId = id;
 		title = current.note.title;
-		content = current.note.content ?? '';
+		content = current.document.plainText;
 		kind = current.meta.kind;
 		color = current.meta.color;
 		language = current.meta.language ?? '';
 		tagInput = current.meta.plainTags.join(', ');
 		projectId = current.note.project_id ?? '';
 		pinned = current.meta.pinned;
+		attachments = current.document.attachments.map((attachment) => ({ ...attachment }));
+		attachmentUrl = '';
+		attachmentTitle = '';
+		attachmentKind = 'link';
+		setMediaMessage(null);
+	};
+
+	const addLinkAttachment = () => {
+		const url = attachmentUrl.trim();
+		if (!url) return;
+		const detectedKind = attachmentKind === 'link' ? detectAttachmentKindFromUrl(url) : attachmentKind;
+		attachments = [
+			...attachments,
+			{
+				id: crypto.randomUUID(),
+				kind: detectedKind,
+				title: attachmentTitle.trim() || attachmentFallbackTitle(url, detectedKind),
+				url,
+				mimeType: null,
+				sizeBytes: null
+			}
+		];
+		attachmentUrl = '';
+		attachmentTitle = '';
+		attachmentKind = 'link';
+		setMediaMessage('Ressource ajoutee au Vault.');
+	};
+
+	const removeAttachment = (id: string) => {
+		attachments = attachments.filter((attachment) => attachment.id !== id);
+	};
+
+	const openMediaPicker = () => {
+		fileInput?.click();
+	};
+
+	const readFileAsDataUrl = (file: File) =>
+		new Promise<string>((resolve, reject) => {
+			const reader = new FileReader();
+			reader.onload = () => resolve(String(reader.result ?? ''));
+			reader.onerror = () => reject(reader.error);
+			reader.readAsDataURL(file);
+		});
+
+	const kindFromMimeType = (mimeType: string): VaultAttachmentKind => {
+		if (mimeType.startsWith('image/')) return 'image';
+		if (mimeType.startsWith('video/')) return 'video';
+		if (mimeType.startsWith('audio/')) return 'audio';
+		return 'link';
+	};
+
+	const handleMediaSelection = async (event: Event) => {
+		const input = event.currentTarget as HTMLInputElement;
+		const files = Array.from(input.files ?? []);
+		if (!files.length) return;
+
+		for (const file of files) {
+			if (file.size > MAX_EMBED_FILE_BYTES) {
+				setMediaMessage(
+					`${file.name} depasse ${formatBytes(MAX_EMBED_FILE_BYTES)}. // V2: basculer les gros medias vers un vrai storage.`,
+					'error'
+				);
+				continue;
+			}
+
+			try {
+				const dataUrl = await readFileAsDataUrl(file);
+				attachments = [
+					...attachments,
+					{
+						id: crypto.randomUUID(),
+						kind: kindFromMimeType(file.type),
+						title: file.name,
+						url: dataUrl,
+						mimeType: file.type || null,
+						sizeBytes: file.size
+					}
+				];
+				setMediaMessage(`${file.name} integre dans le Vault.`);
+			} catch {
+				setMediaMessage(`Impossible de lire ${file.name}.`, 'error');
+			}
+		}
+
+		input.value = '';
 	};
 
 	const submit = async () => {
 		const trimmedContent = content.trim();
 		const plainTags = parseTagInput(tagInput);
 		const nextTitle =
-			title.trim() || trimmedContent.split('\n')[0].trim().slice(0, 72) || defaultTitleForKind(kind);
+			title.trim() ||
+			trimmedContent.split('\n')[0].trim().slice(0, 72) ||
+			attachments[0]?.title ||
+			defaultTitleForKind(kind);
 
 		const payload = {
 			title: nextTitle,
-			content: trimmedContent || null,
+			content: buildVaultContent(trimmedContent, attachments),
 			project_id: projectId || null,
 			tags: buildVaultTags({
 				kind,
@@ -173,8 +314,10 @@
 	};
 
 	const copyContent = async (id: string, value: string | null) => {
-		if (!browser || !value) return;
-		await navigator.clipboard.writeText(value);
+		if (!browser) return;
+		const copyable = buildCopyableVaultText(value);
+		if (!copyable) return;
+		await navigator.clipboard.writeText(copyable);
 		copyMessage = id;
 		setTimeout(() => {
 			if (copyMessage === id) copyMessage = null;
@@ -307,6 +450,96 @@
 					placeholder="Tags libres, separes par virgules ou #"
 					bind:value={tagInput}
 				/>
+
+				<div class="rounded-3xl border border-white/8 bg-[linear-gradient(135deg,rgba(255,79,216,0.06),transparent_55%),rgba(255,255,255,0.01)] p-4">
+					<div class="flex flex-col gap-3">
+						<div>
+							<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Medias et liens</p>
+							<p class="mt-2 text-sm text-zinc-400">
+								Ajoute une video, une image, un audio, ou un lien utile directement dans la note.
+							</p>
+						</div>
+
+						<div class="grid gap-3 md:grid-cols-[0.9fr_1.3fr_auto]">
+							<select
+								class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none"
+								bind:value={attachmentKind}
+							>
+								<option value="link">Lien</option>
+								<option value="image">Image</option>
+								<option value="video">Video</option>
+								<option value="audio">Audio</option>
+							</select>
+							<input
+								class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none transition focus:border-[#3399FF]/40"
+								placeholder="URL d une ressource, video ou page importante"
+								bind:value={attachmentUrl}
+							/>
+							<button
+								class="rounded-2xl border border-white/10 px-4 py-3 text-sm text-white"
+								type="button"
+								onclick={addLinkAttachment}
+							>
+								Ajouter le lien
+							</button>
+						</div>
+
+						<div class="grid gap-3 md:grid-cols-[1fr_auto]">
+							<input
+								class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none transition focus:border-[#3399FF]/40"
+								placeholder="Titre optionnel pour la ressource"
+								bind:value={attachmentTitle}
+							/>
+							<button
+								class="rounded-2xl bg-[#FF4FD8] px-4 py-3 text-sm font-medium text-white shadow-[0_0_18px_rgba(255,79,216,0.14)]"
+								type="button"
+								onclick={openMediaPicker}
+							>
+								Importer un media
+							</button>
+						</div>
+
+						<input
+							class="hidden"
+							type="file"
+							accept="image/*,video/*,audio/*"
+							multiple
+							bind:this={fileInput}
+							onchange={handleMediaSelection}
+						/>
+
+						{#if mediaMessage}
+							<p class={`text-sm ${mediaMessageTone === 'error' ? 'text-rose-300' : 'text-[#8fcaff]'}`}>
+								{mediaMessage}
+							</p>
+						{/if}
+
+						{#if attachments.length}
+							<div class="grid gap-2">
+								{#each attachments as attachment}
+									<div class="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
+										<div class="min-w-0">
+											<p class="truncate text-sm font-medium text-white">{attachment.title}</p>
+											<p class="mt-1 text-xs text-zinc-400">
+												{vaultAttachmentKindLabel(attachment.kind)}
+												{#if formatBytes(attachment.sizeBytes)}
+													- {formatBytes(attachment.sizeBytes)}
+												{/if}
+											</p>
+										</div>
+										<button
+											class="rounded-full border border-red-500/20 px-3 py-1 text-xs text-red-300"
+											type="button"
+											onclick={() => removeAttachment(attachment.id)}
+										>
+											Retirer
+										</button>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				</div>
 
 				<textarea
 					class="min-h-[220px] w-full rounded-3xl border border-white/10 bg-black/20 px-4 py-4 text-sm leading-6 text-white outline-none transition focus:border-[#3399FF]/40"
@@ -441,10 +674,62 @@
 								</p>
 							{/if}
 
-							{#if item.note.content}
-								<pre class="mt-4 max-h-56 overflow-auto whitespace-pre-wrap rounded-2xl border border-white/6 bg-black/25 px-4 py-3 font-sans text-sm leading-6 text-zinc-200">{item.note.content}</pre>
-							{:else}
+							{#if item.document.plainText}
+								<pre class="mt-4 max-h-56 overflow-auto whitespace-pre-wrap rounded-2xl border border-white/6 bg-black/25 px-4 py-3 font-sans text-sm leading-6 text-zinc-200">{item.document.plainText}</pre>
+							{:else if !item.document.attachments.length}
 								<p class="mt-4 text-sm text-zinc-500">Contenu vide.</p>
+							{/if}
+
+							{#if item.document.attachments.length}
+								<div class="mt-4 space-y-3">
+									{#each item.document.attachments as attachment}
+										<div class="overflow-hidden rounded-2xl border border-white/8 bg-black/25">
+											<div class="flex items-center justify-between gap-3 border-b border-white/6 px-4 py-3">
+												<div>
+													<p class="text-sm font-medium text-white">{attachment.title}</p>
+													<p class="mt-1 text-xs text-zinc-400">
+														{vaultAttachmentKindLabel(attachment.kind)}
+														{#if formatBytes(attachment.sizeBytes)}
+															- {formatBytes(attachment.sizeBytes)}
+														{/if}
+													</p>
+												</div>
+												<a
+													class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300"
+													href={attachment.url}
+													target="_blank"
+													rel="noreferrer"
+												>
+													Ouvrir
+												</a>
+											</div>
+
+											{#if isImageAttachment(attachment)}
+												<img
+													class="max-h-72 w-full object-cover"
+													src={attachment.url}
+													alt={attachment.title}
+												/>
+											{:else if isVideoAttachment(attachment)}
+												<!-- svelte-ignore a11y_media_has_caption -->
+												<video
+													class="max-h-72 w-full bg-black"
+													src={attachment.url}
+													controls
+													preload="metadata"
+												></video>
+											{:else if isAudioAttachment(attachment)}
+												<div class="px-4 py-4">
+													<audio class="w-full" src={attachment.url} controls preload="metadata"></audio>
+												</div>
+											{:else}
+												<div class="px-4 py-4">
+													<p class="break-all text-sm text-zinc-300">{attachment.url}</p>
+												</div>
+											{/if}
+										</div>
+									{/each}
+								</div>
 							{/if}
 
 							{#if item.meta.plainTags.length}

@@ -71,11 +71,15 @@ The broader note-taking layer was added as a `Vault` built on top of the existin
 
 Metadata such as item kind, color, pinning, and snippet language is encoded in `notes.tags` with reserved prefixes.
 
+The note body itself can now hold a structured Vault document with plain text plus lightweight attachments such as links, images, short audio clips, or small videos.
+
 That choice kept three things stable:
 
 - no Supabase SQL migration for this pass
 - no Dexie mirror change for sync
 - no regression risk for offline replay and conflict handling
+
+To keep the product reliable, embedded media is intentionally capped to small files in this version. Larger files should move to dedicated object storage in a later pass.
 
 If the Vault later needs attachments, sharing, or richer search, it can graduate to dedicated tables. For now, the metadata-on-tags approach is the fastest safe extension.
 

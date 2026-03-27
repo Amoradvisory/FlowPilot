@@ -1,4 +1,5 @@
 import type { Note } from '$lib/types';
+import { searchableVaultText } from '$lib/vault-document';
 
 export type VaultKind = 'note' | 'prompt' | 'snippet' | 'reference';
 export type VaultColor = 'blue' | 'pink' | 'green' | 'amber' | 'violet' | 'rose' | 'slate';
@@ -140,8 +141,7 @@ export const parseTagInput = (value: string) =>
 
 export const matchVaultQuery = (note: Note, query: string) => {
 	if (!query.trim()) return true;
-	const haystack = [note.title, note.content ?? '', ...note.tags].join(' ').toLowerCase();
-	return haystack.includes(query.trim().toLowerCase());
+	return searchableVaultText(note).includes(query.trim().toLowerCase());
 };
 
 export const noteColorClasses = (color: VaultColor) =>
