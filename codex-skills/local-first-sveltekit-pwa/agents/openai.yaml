@@ -1,0 +1,4 @@
+interface:
+  display_name: "Local-First SvelteKit PWA"
+  short_description: "Ship local-first SvelteKit PWAs reliably"
+  default_prompt: "Ship or stabilize a local-first SvelteKit PWA with Dexie local storage, Supabase sync/auth, offline behavior, and a reliable validation loop."
