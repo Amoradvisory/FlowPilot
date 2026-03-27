@@ -53,20 +53,13 @@ export const TABLE_USER_FIELD: Record<TableName, 'id' | 'user_id'> = {
 export const SOFT_DELETE_TABLES = new Set<TableName>(['projects', 'tasks', 'notes', 'habits']);
 
 export const NAV_ITEMS = [
-	{ href: '/', label: 'Dashboard', short: 'Home', icon: 'H' },
-	{ href: '/tasks', label: 'Taches', short: 'Tasks', icon: 'T' },
-	{ href: '/agenda', label: 'Agenda', short: 'Agenda', icon: 'A' },
-	{ href: '/focus', label: 'Focus', short: 'Focus', icon: 'F' }
+	{ href: '/', label: 'Accueil', short: 'Home', icon: 'H' },
+	{ href: '/vault', label: 'Notes', short: 'Notes', icon: 'N' },
+	{ href: '/media', label: 'Medias', short: 'Media', icon: 'M' },
+	{ href: '/collections', label: 'Classement', short: 'Classer', icon: 'C' }
 ] as const;
 
 export const SECONDARY_ITEMS = [
-	{ href: '/inbox', label: 'Inbox' },
-	{ href: '/clarify', label: 'Clarifier' },
-	{ href: '/vault', label: 'Vault' },
-	{ href: '/projects', label: 'Projets' },
-	{ href: '/habits', label: 'Habitudes' },
-	{ href: '/review', label: 'Revue' },
-	{ href: '/analytics', label: 'Analytics' },
 	{ href: '/settings', label: 'Parametres' }
 ] as const;
 

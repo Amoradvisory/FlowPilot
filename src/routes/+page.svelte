@@ -1,245 +1,238 @@
 <script lang="ts">
 	import Card from '$lib/components/Card.svelte';
-	import { currentTask, dashboardPrompts, flowpilot, habitProgress, notes, pendingInboxItems, profile, projectProgress, todayFocusMinutes, todayTasks, overdueTasks, visibleTasks } from '$lib/flowpilot';
+	import QuickNotesPanel from '$lib/components/QuickNotesPanel.svelte';
+	import { notes } from '$lib/flowpilot';
+	import { NOTE_COLOR_OPTIONS, getVaultMeta, noteColorClasses, type VaultMeta } from '$lib/note-vault';
+	import {
+		isAudioAttachment,
+		isImageAttachment,
+		isVideoAttachment,
+		parseVaultContent,
+		summarizeVaultContent
+	} from '$lib/vault-document';
 	import type { Note } from '$lib/types';
-	import { formatMinutes } from '$lib/utils';
-	import { getVaultMeta, type VaultMeta } from '$lib/note-vault';
 
-	type DashboardVaultItem = {
+	type NoteDashboardItem = {
 		note: Note;
 		meta: VaultMeta;
+		document: ReturnType<typeof parseVaultContent>;
+		colors: ReturnType<typeof noteColorClasses>;
 	};
 
-	const today = new Date().toISOString().slice(0, 10);
-	const plannedTodayTotal = $derived($visibleTasks.filter((task) => task.scheduled_date === today).length);
-	const plannedTodayDone = $derived(
-		$visibleTasks.filter((task) => task.scheduled_date === today && task.status === 'done').length
-	);
-	const inboxBacklog = $derived(
-		$pendingInboxItems.filter((item) => Date.now() - new Date(item.created_at).getTime() > 24 * 60 * 60 * 1000)
-	);
-	const vaultItems = $derived(
+	type TagSummary = {
+		tag: string;
+		count: number;
+	};
+
+	const noteItems = $derived(
 		$notes
 			.filter((note) => !note.deleted_at)
-			.map((note): DashboardVaultItem => ({ note, meta: getVaultMeta(note) }))
-			.sort((left, right) => {
-				if (left.meta.pinned !== right.meta.pinned) return Number(right.meta.pinned) - Number(left.meta.pinned);
-				return new Date(right.note.updated_at).getTime() - new Date(left.note.updated_at).getTime();
+			.map((note): NoteDashboardItem | null => {
+				const meta = getVaultMeta(note);
+				if (meta.kind !== 'note') return null;
+				return {
+					note,
+					meta,
+					document: parseVaultContent(note.content),
+					colors: noteColorClasses(meta.color)
+				};
 			})
+			.filter((item): item is NoteDashboardItem => Boolean(item))
+			.sort((left, right) => new Date(right.note.updated_at).getTime() - new Date(left.note.updated_at).getTime())
 	);
-	const pinnedVault = $derived(vaultItems.filter((item: DashboardVaultItem) => item.meta.pinned));
-	const promptVault = $derived(
-		vaultItems.filter((item: DashboardVaultItem) => item.meta.kind === 'prompt')
+
+	const pinnedNotes = $derived(noteItems.filter((item: NoteDashboardItem) => item.meta.pinned));
+	const mediaNotes = $derived(noteItems.filter((item: NoteDashboardItem) => item.document.attachments.length > 0));
+	const quickCaptureNotes = $derived(
+		noteItems.filter((item: NoteDashboardItem) => item.meta.plainTags.includes('capture-rapide'))
+	);
+	const recentNotes = $derived(noteItems.slice(0, 6));
+	const topTags = $derived.by(() => {
+		const counts = new Map<string, number>();
+		for (const item of noteItems) {
+			for (const tag of item.meta.plainTags) {
+				counts.set(tag, (counts.get(tag) ?? 0) + 1);
+			}
+		}
+		return [...counts.entries()]
+			.map(([tag, count]): TagSummary => ({ tag, count }))
+			.sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag))
+			.slice(0, 8);
+	});
+	const colorSummary = $derived(
+		NOTE_COLOR_OPTIONS.map((option) => ({
+			...option,
+			count: noteItems.filter((item: NoteDashboardItem) => item.meta.color === option.value).length
+		})).filter((item) => item.count > 0)
 	);
 </script>
 
 <div class="space-y-4">
-	<Card tone="active" class="sticky top-20 z-10">
-		<p class="text-xs uppercase tracking-[0.2em] text-[#3399FF]">Maintenant</p>
-		{#if $currentTask}
-			<div class="mt-3 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+	<QuickNotesPanel />
+
+	<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+		<Card class="bg-[linear-gradient(135deg,rgba(51,153,255,0.08),transparent_65%),#111]">
+			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Notes</p>
+			<p class="mt-2 text-3xl font-semibold text-white">{noteItems.length}</p>
+			<p class="mt-2 text-sm text-zinc-400">Toutes tes notes texte, photo et media reunies.</p>
+		</Card>
+		<Card class="bg-[linear-gradient(135deg,rgba(255,79,216,0.08),transparent_65%),#111]">
+			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Captures rapides</p>
+			<p class="mt-2 text-3xl font-semibold text-white">{quickCaptureNotes.length}</p>
+			<p class="mt-2 text-sm text-zinc-400">Les notes prises a la volee restent faciles a retrouver.</p>
+		</Card>
+		<Card class="bg-[linear-gradient(135deg,rgba(34,197,94,0.08),transparent_65%),#111]">
+			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Notes avec media</p>
+			<p class="mt-2 text-3xl font-semibold text-white">{mediaNotes.length}</p>
+			<p class="mt-2 text-sm text-zinc-400">Images, videos, audio et liens gardes dans les notes.</p>
+		</Card>
+		<Card class="bg-[linear-gradient(135deg,rgba(245,158,11,0.08),transparent_65%),#111]">
+			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Epinglees</p>
+			<p class="mt-2 text-3xl font-semibold text-white">{pinnedNotes.length}</p>
+			<p class="mt-2 text-sm text-zinc-400">Tes notes prioritaires restent au premier plan.</p>
+		</Card>
+	</div>
+
+	<div class="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+		<Card>
+			<div class="flex items-center justify-between gap-4">
 				<div>
-					<h2 class="text-2xl font-semibold text-white">{$currentTask.title}</h2>
-					<p class="mt-2 text-sm text-zinc-400">
-						{$currentTask.priority} - {$currentTask.estimated_duration ?? 25} min - {$currentTask.context ?? 'sans contexte'}
-					</p>
+					<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Recentes</p>
+					<h2 class="mt-2 text-xl font-semibold text-white">Les dernieres notes</h2>
+					<p class="mt-2 text-sm text-zinc-400">Le flux le plus recent, sans quitter l’accueil.</p>
 				</div>
-
-				<div class="flex flex-wrap gap-3">
-					<a class="rounded-2xl border border-white/10 px-4 py-3 text-sm text-white" href="/tasks">
-						Details
-					</a>
-					<button class="rounded-2xl bg-[#3399FF] px-4 py-3 text-sm font-medium text-white" type="button" onclick={() => flowpilot.startFocus($currentTask.id)}>
-						Focus
-					</button>
-				</div>
+				<a class="rounded-2xl border border-white/10 px-3 py-2 text-sm text-white" href="/vault">Bibliotheque complete</a>
 			</div>
-		{:else}
-			<div class="mt-3 flex items-center justify-between gap-4">
-				<div>
-					<h2 class="text-2xl font-semibold text-white">Planifie ta journee</h2>
-					<p class="mt-2 text-sm text-zinc-400">Aucune tache prioritaire claire pour le moment.</p>
-				</div>
-				<a class="rounded-2xl bg-[#3399FF] px-4 py-3 text-sm font-medium text-white" href="/tasks">Planifier</a>
-			</div>
-		{/if}
-	</Card>
 
-	{#if $dashboardPrompts.length}
-		<div class="grid gap-3 md:grid-cols-2">
-			{#each $dashboardPrompts as prompt}
-				<Card tone={prompt.tone === 'warning' ? 'warning' : 'default'} class="space-y-3">
-					<div>
-						<p class="text-sm font-medium text-white">{prompt.title}</p>
-						<p class="mt-2 text-sm text-zinc-400">{prompt.body}</p>
-					</div>
-					<a class="inline-flex rounded-2xl border border-white/10 px-4 py-2 text-sm text-white" href={prompt.actionHref}>
-						{prompt.actionLabel}
-					</a>
-				</Card>
-			{/each}
-		</div>
-	{/if}
-
-	<div class="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-		<div class="space-y-4">
-			<Card>
-				<div class="mb-4 flex items-center justify-between">
-					<div>
-						<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Aujourd hui</p>
-						<h2 class="mt-2 text-xl font-semibold text-white">{$todayTasks.length} tache(s) planifiee(s)</h2>
-						<p class="mt-2 text-sm text-zinc-400">
-							Progression {plannedTodayDone}/{plannedTodayTotal || 0}
-						</p>
-					</div>
-					<a class="rounded-2xl border border-white/10 px-3 py-2 text-sm text-white" href="/tasks">Voir tout</a>
-				</div>
-
-				<div class="mb-4 h-2 rounded-full bg-white/6">
-					<div
-						class="h-2 rounded-full bg-green-500"
-						style={`width: ${plannedTodayTotal ? (plannedTodayDone / plannedTodayTotal) * 100 : 0}%`}
-					></div>
-				</div>
-
-				<div class="space-y-3">
-					{#if $todayTasks.length}
-						{#each $todayTasks as task}
-							<div class="rounded-2xl border border-white/6 bg-black/20 px-4 py-3">
-								<div class="flex items-start justify-between gap-4">
-									<div>
-										<p class="font-medium text-white">{task.title}</p>
-										<p class="mt-1 text-sm text-zinc-400">
-											{task.priority} - {task.estimated_duration ?? 25} min - {task.scheduled_time_start ?? 'a planifier'}
-										</p>
-									</div>
-									<button class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300" type="button" onclick={() => flowpilot.completeTask(task.id)}>
-										Terminer
-									</button>
+			<div class="mt-4 space-y-3">
+				{#if recentNotes.length}
+					{#each recentNotes as item}
+						<a class={`block rounded-2xl border px-4 py-3 transition hover:border-white/14 ${item.colors.card}`} href="/vault">
+							<div class="flex items-start justify-between gap-3">
+								<div class="min-w-0">
+									<p class="truncate font-medium text-white">{item.note.title}</p>
+									<p class="mt-1 text-sm text-zinc-400">{summarizeVaultContent(item.note.content, 120)}</p>
+								</div>
+								<div class="shrink-0 text-right">
+									{#if item.document.attachments.length}
+										<p class="text-xs uppercase tracking-[0.16em] text-zinc-500">{item.document.attachments.length} media(s)</p>
+									{/if}
+									<p class="mt-1 text-xs text-zinc-500">
+										{new Date(item.note.updated_at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+									</p>
 								</div>
 							</div>
-						{/each}
-					{:else}
-						<p class="text-sm text-zinc-500">Aucune tache du jour pour le moment.</p>
-					{/if}
-				</div>
-			</Card>
+						</a>
+					{/each}
+				{:else}
+					<p class="text-sm text-zinc-500">Commence par une note rapide ou une photo commentee.</p>
+				{/if}
+			</div>
+		</Card>
 
-			<Card>
-				<div class="mb-4 flex items-center justify-between">
-					<div>
-						<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Habitudes</p>
-						<h2 class="mt-2 text-xl font-semibold text-white">Check rapide</h2>
-					</div>
-					<a class="rounded-2xl border border-white/10 px-3 py-2 text-sm text-white" href="/habits">Gerer</a>
+		<Card class="bg-[radial-gradient(circle_at_top_right,rgba(255,79,216,0.08),transparent_38%),#111]">
+			<div class="flex items-center justify-between gap-4">
+				<div>
+					<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Classement</p>
+					<h2 class="mt-2 text-xl font-semibold text-white">Couleurs et tags</h2>
 				</div>
+				<a class="rounded-2xl border border-white/10 px-3 py-2 text-sm text-white" href="/collections">Explorer</a>
+			</div>
 
-				<div class="space-y-3">
-					{#if $habitProgress.length}
-						{#each $habitProgress as item}
-							<div class="flex items-center justify-between rounded-2xl border border-white/6 bg-black/20 px-4 py-3">
-								<div>
-									<p class="font-medium text-white">{item.habit.title}</p>
-									<p class="mt-1 text-sm text-zinc-400">streak {item.currentStreak} - meilleur {item.bestStreak}</p>
+			<div class="mt-4 space-y-4">
+				<div>
+					<p class="text-xs uppercase tracking-[0.16em] text-zinc-500">Couleurs actives</p>
+					<div class="mt-3 flex flex-wrap gap-2">
+						{#if colorSummary.length}
+							{#each colorSummary as option}
+								<div class="rounded-full border px-3 py-2 text-xs text-white" style={`background: linear-gradient(135deg, ${option.accent}22, rgba(17,17,17,0.95)); border-color: ${option.accent}44;`}>
+									{option.label} · {option.count}
 								</div>
-								<button
-									class={`rounded-2xl px-4 py-2 text-sm font-medium ${item.todayDone ? 'bg-green-500/15 text-green-300' : 'border border-white/10 text-white'}`}
-									type="button"
-									onclick={() => flowpilot.toggleHabitCompletion(item.habit.id)}
-								>
-									{item.todayDone ? 'Fait' : 'Valider'}
-								</button>
-							</div>
-						{/each}
-					{:else}
-						<p class="text-sm text-zinc-500">Ajoute une habitude pour le suivi quotidien.</p>
-					{/if}
-				</div>
-			</Card>
-		</div>
-
-		<div class="space-y-4">
-			<Card>
-				<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Focus</p>
-				<h2 class="mt-2 text-xl font-semibold text-white">{formatMinutes($todayFocusMinutes)}</h2>
-				<p class="mt-2 text-sm text-zinc-400">
-					Objectif {formatMinutes($profile?.settings.daily_focus_goal_minutes ?? 240)}
-				</p>
-				<div class="mt-4 h-2 rounded-full bg-white/6">
-					<div
-						class="h-2 rounded-full bg-[#3399FF]"
-						style={`width: ${Math.min(100, (($todayFocusMinutes / ($profile?.settings.daily_focus_goal_minutes ?? 240)) * 100) || 0)}%`}
-					></div>
-				</div>
-			</Card>
-
-			<Card>
-				<div class="flex items-center justify-between">
-					<div>
-						<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Inbox</p>
-						<h2 class="mt-2 text-xl font-semibold text-white">{$pendingInboxItems.length} pending</h2>
-						{#if $pendingInboxItems.length > 10 && inboxBacklog.length}
-							<p class="mt-2 text-sm text-red-300">
-								Backlog actif: {inboxBacklog.length} element(s) ont plus de 24h.
-							</p>
+							{/each}
+						{:else}
+							<p class="text-sm text-zinc-500">Aucune couleur utilisee pour le moment.</p>
 						{/if}
 					</div>
-					<a class="rounded-2xl border border-white/10 px-3 py-2 text-sm text-white" href="/clarify">Clarifier</a>
 				</div>
 
-				<div class="mt-4 space-y-2">
-					{#each $pendingInboxItems.slice(0, 4) as item}
-						<div class={`rounded-2xl border px-4 py-3 text-sm ${Date.now() - new Date(item.created_at).getTime() > 48 * 60 * 60 * 1000 ? 'border-red-500/20 bg-[#1a1212] text-red-100' : 'border-white/6 bg-black/20 text-zinc-300'}`}>
-							{item.raw_text}
-						</div>
+				<div>
+					<p class="text-xs uppercase tracking-[0.16em] text-zinc-500">Tags utiles</p>
+					<div class="mt-3 flex flex-wrap gap-2">
+						{#if topTags.length}
+							{#each topTags as item}
+								<div class="rounded-full border border-white/10 bg-black/20 px-3 py-2 text-xs text-zinc-300">
+									#{item.tag} · {item.count}
+								</div>
+							{/each}
+						{:else}
+							<p class="text-sm text-zinc-500">Ajoute quelques tags pour commencer ton classement.</p>
+						{/if}
+					</div>
+				</div>
+			</div>
+		</Card>
+	</div>
+
+	<div class="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+		<Card>
+			<div class="flex items-center justify-between gap-4">
+				<div>
+					<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Epinglees</p>
+					<h2 class="mt-2 text-xl font-semibold text-white">Notes a garder en tete</h2>
+				</div>
+				<a class="rounded-2xl border border-white/10 px-3 py-2 text-sm text-white" href="/vault">Voir les notes</a>
+			</div>
+
+			<div class="mt-4 space-y-3">
+				{#if pinnedNotes.length}
+					{#each pinnedNotes.slice(0, 4) as item}
+						<a class={`block rounded-2xl border px-4 py-3 transition hover:border-white/14 ${item.colors.card}`} href="/vault">
+							<p class="font-medium text-white">{item.note.title}</p>
+							<p class="mt-1 text-sm text-zinc-400">{summarizeVaultContent(item.note.content, 110)}</p>
+						</a>
 					{/each}
-				</div>
-			</Card>
+				{:else}
+					<p class="text-sm text-zinc-500">Epingle une note importante pour la garder ici.</p>
+				{/if}
+			</div>
+		</Card>
 
-			<Card class="bg-[radial-gradient(circle_at_top_right,rgba(255,79,216,0.12),transparent_36%),radial-gradient(circle_at_top_left,rgba(51,153,255,0.12),transparent_34%),#111]">
-				<div class="flex items-center justify-between gap-4">
-					<div>
-						<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Vault</p>
-						<h2 class="mt-2 text-xl font-semibold text-white">{pinnedVault.length} epingle(s)</h2>
-						<p class="mt-2 text-sm text-zinc-400">{promptVault.length} prompt(s) et {vaultItems.length} note(s) utiles a reutiliser.</p>
-					</div>
-					<a class="rounded-2xl border border-white/10 px-3 py-2 text-sm text-white" href="/vault">Ouvrir</a>
+		<Card>
+			<div class="flex items-center justify-between gap-4">
+				<div>
+					<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Medias recents</p>
+					<h2 class="mt-2 text-xl font-semibold text-white">Images, audio et videos</h2>
 				</div>
+				<a class="rounded-2xl border border-white/10 px-3 py-2 text-sm text-white" href="/media">Galerie media</a>
+			</div>
 
-				<div class="mt-4 space-y-2">
-					{#if pinnedVault.length}
-						{#each pinnedVault.slice(0, 3) as item}
-							<div class="rounded-2xl border border-white/6 bg-black/20 px-4 py-3">
+			<div class="mt-4 grid gap-3 md:grid-cols-2">
+				{#if mediaNotes.length}
+					{#each mediaNotes.slice(0, 4) as item}
+						<a class="overflow-hidden rounded-2xl border border-white/8 bg-black/20 transition hover:border-white/14" href="/media">
+							{#if isImageAttachment(item.document.attachments[0])}
+								<img class="h-36 w-full object-cover" src={item.document.attachments[0].url} alt={item.note.title} />
+							{:else}
+								<div class="flex h-36 items-center justify-center bg-white/[0.03] text-sm text-zinc-300">
+									{#if isVideoAttachment(item.document.attachments[0])}
+										Video
+									{:else if isAudioAttachment(item.document.attachments[0])}
+										Audio
+									{:else}
+										Lien
+									{/if}
+								</div>
+							{/if}
+							<div class="px-4 py-3">
 								<p class="font-medium text-white">{item.note.title}</p>
-								<p class="mt-1 text-sm text-zinc-400">{item.meta.kind}</p>
+								<p class="mt-1 text-sm text-zinc-400">{summarizeVaultContent(item.note.content, 80)}</p>
 							</div>
-						{/each}
-					{:else}
-						<p class="text-sm text-zinc-500">Ajoute une note importante ou un prompt pour les retrouver ici.</p>
-					{/if}
-				</div>
-			</Card>
-
-			{#if $overdueTasks.length || $projectProgress.some((item) => item.isStagnant)}
-				<Card tone="warning">
-					<p class="text-xs uppercase tracking-[0.2em] text-red-300">En retard</p>
-					<div class="mt-4 space-y-3">
-						{#each $overdueTasks.slice(0, 4) as task}
-							<div class="rounded-2xl border border-red-500/10 bg-black/20 px-4 py-3">
-								<p class="font-medium text-white">{task.title}</p>
-								<p class="mt-1 text-sm text-zinc-400">{task.deadline ?? task.scheduled_date}</p>
-							</div>
-						{/each}
-
-						{#each $projectProgress.filter((item) => item.isStagnant).slice(0, 3) as item}
-							<div class="rounded-2xl border border-white/6 bg-black/20 px-4 py-3">
-								<p class="font-medium text-white">{item.project.title}</p>
-								<p class="mt-1 text-sm text-zinc-400">Projet stagnant depuis plus de 7 jours</p>
-							</div>
-						{/each}
-					</div>
-				</Card>
-			{/if}
-		</div>
+						</a>
+					{/each}
+				{:else}
+					<p class="text-sm text-zinc-500">Ajoute une image, un audio ou une video pour remplir la galerie.</p>
+				{/if}
+			</div>
+		</Card>
 	</div>
 </div>

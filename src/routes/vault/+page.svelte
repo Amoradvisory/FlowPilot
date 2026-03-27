@@ -5,18 +5,13 @@
 	import type { Note, Project } from '$lib/types';
 	import {
 		buildVaultTags,
-		defaultTitleForKind,
 		getVaultMeta,
 		matchVaultQuery,
 		NOTE_COLOR_OPTIONS,
 		noteColorClasses,
-		NOTE_KIND_OPTIONS,
-		NOTE_TEMPLATES,
 		parseTagInput,
 		type VaultMeta,
-		type VaultColor,
-		type VaultKind,
-		vaultKindLabel
+		type VaultColor
 	} from '$lib/note-vault';
 	import {
 		buildCopyableVaultText,
@@ -43,15 +38,12 @@
 	const MAX_EMBED_FILE_BYTES = 5 * 1024 * 1024;
 
 	let search = $state('');
-	let kindFilter = $state<'all' | VaultKind>('all');
 	let colorFilter = $state<'all' | VaultColor>('all');
 	let pinnedOnly = $state(false);
 	let editingId = $state<string | null>(null);
 	let title = $state('');
 	let content = $state('');
-	let kind = $state<VaultKind>('note');
 	let color = $state<VaultColor>('blue');
-	let language = $state('');
 	let tagInput = $state('');
 	let projectId = $state('');
 	let pinned = $state(false);
@@ -74,8 +66,9 @@
 	const vaultItems = $derived(
 		$notes
 			.filter((note) => !note.deleted_at)
-			.map((note): VaultItem => {
+			.map((note): VaultItem | null => {
 				const meta = getVaultMeta(note);
+				if (meta.kind !== 'note') return null;
 				const document = parseVaultContent(note.content);
 				return {
 					note,
@@ -85,6 +78,7 @@
 					colors: noteColorClasses(meta.color)
 				};
 			})
+			.filter((item): item is VaultItem => Boolean(item))
 			.sort((left, right) => {
 				if (left.meta.pinned !== right.meta.pinned) return Number(right.meta.pinned) - Number(left.meta.pinned);
 				return new Date(right.note.updated_at).getTime() - new Date(left.note.updated_at).getTime();
@@ -93,7 +87,6 @@
 
 	const filteredItems = $derived(
 		vaultItems.filter((item: VaultItem) => {
-			if (kindFilter !== 'all' && item.meta.kind !== kindFilter) return false;
 			if (colorFilter !== 'all' && item.meta.color !== colorFilter) return false;
 			if (pinnedOnly && !item.meta.pinned) return false;
 			return matchVaultQuery(item.note, search);
@@ -102,19 +95,15 @@
 
 	const recentQuickCaptures = $derived(
 		vaultItems
-			.filter((item: VaultItem) => item.meta.kind === 'note' && item.meta.plainTags.includes('capture-rapide'))
+			.filter((item: VaultItem) => item.meta.plainTags.includes('capture-rapide'))
 			.slice(0, 4)
 	);
 
-	const pinnedCount = $derived(vaultItems.filter((item: VaultItem) => item.meta.pinned).length);
-	const promptCount = $derived(
-		vaultItems.filter((item: VaultItem) => item.meta.kind === 'prompt').length
+	const quickCaptureCount = $derived(
+		vaultItems.filter((item: VaultItem) => item.meta.plainTags.includes('capture-rapide')).length
 	);
-	const snippetCount = $derived(
-		vaultItems.filter((item: VaultItem) => item.meta.kind === 'snippet').length
-	);
-	const referenceCount = $derived(
-		vaultItems.filter((item: VaultItem) => item.meta.kind === 'reference').length
+	const mediaNoteCount = $derived(
+		vaultItems.filter((item: VaultItem) => item.document.attachments.length > 0).length
 	);
 
 	const setMediaMessage = (message: string | null, tone: 'error' | 'info' = 'info') => {
@@ -162,9 +151,7 @@
 		editingId = null;
 		title = '';
 		content = '';
-		kind = 'note';
 		color = 'blue';
-		language = '';
 		tagInput = '';
 		projectId = '';
 		pinned = false;
@@ -175,31 +162,13 @@
 		setMediaMessage(null);
 	};
 
-	const loadTemplate = (templateId: string) => {
-		const template = NOTE_TEMPLATES.find((item) => item.id === templateId);
-		if (!template) return;
-		editingId = null;
-		title = template.title;
-		content = template.content;
-		kind = template.kind;
-		color = template.color;
-		language = template.language ?? '';
-		tagInput = '';
-		projectId = '';
-		pinned = template.kind !== 'snippet';
-		attachments = [];
-		setMediaMessage(null);
-	};
-
 	const startEdit = (id: string) => {
 		const current = vaultItems.find((item: VaultItem) => item.note.id === id);
 		if (!current) return;
 		editingId = id;
 		title = current.note.title;
 		content = current.document.plainText;
-		kind = current.meta.kind;
 		color = current.meta.color;
-		language = current.meta.language ?? '';
 		tagInput = current.meta.plainTags.join(', ');
 		projectId = current.note.project_id ?? '';
 		pinned = current.meta.pinned;
@@ -228,7 +197,7 @@
 		attachmentUrl = '';
 		attachmentTitle = '';
 		attachmentKind = 'link';
-		setMediaMessage('Ressource ajoutee au Vault.');
+		setMediaMessage('Ressource ajoutee a la note.');
 	};
 
 	const removeAttachment = (id: string) => {
@@ -356,7 +325,7 @@
 
 		lastQuickCaptureId = savedNote?.id ?? null;
 		resetQuickCapture();
-		setQuickCaptureMessage('Capture rapide ajoutee au Vault. Elle apparait juste en dessous.');
+		setQuickCaptureMessage('Capture rapide ajoutee aux notes. Elle apparait juste en dessous.');
 	};
 
 	const submit = async () => {
@@ -366,17 +335,16 @@
 			title.trim() ||
 			trimmedContent.split('\n')[0].trim().slice(0, 72) ||
 			attachments[0]?.title ||
-			defaultTitleForKind(kind);
+			'Nouvelle note';
 
 		const payload = {
 			title: nextTitle,
 			content: buildVaultContent(trimmedContent, attachments),
 			project_id: projectId || null,
 			tags: buildVaultTags({
-				kind,
+				kind: 'note',
 				color,
 				pinned,
-				language,
 				plainTags
 			})
 		};
@@ -395,10 +363,9 @@
 		if (!current) return;
 		await flowpilot.updateNote(id, {
 			tags: buildVaultTags({
-				kind: current.meta.kind,
+				kind: 'note',
 				color: current.meta.color,
 				pinned: !current.meta.pinned,
-				language: current.meta.language,
 				plainTags: current.meta.plainTags
 			})
 		});
@@ -437,12 +404,12 @@
 				<p class="text-xs uppercase tracking-[0.22em] text-[#8fcaff]">Capture rapide</p>
 				<h1 class="mt-3 text-3xl font-semibold text-white">Une idee, une note ou une photo en quelques secondes</h1>
 				<p class="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">
-					Utilise ce bloc pour capturer vite, sans passer par les prompts ni l'editeur complet.
+					Utilise ce bloc pour capturer vite une idee, une photo et son commentaire, sans quitter ton flux.
 				</p>
 
 				<textarea
 					class="mt-4 min-h-[180px] w-full rounded-3xl border border-white/10 bg-black/20 px-4 py-4 text-sm leading-6 text-white outline-none transition focus:border-[#3399FF]/40"
-					placeholder="Note rapide, idee, chose a ne pas oublier..."
+					placeholder="Note rapide, commentaire de photo, idee ou chose a ne pas oublier..."
 					bind:value={quickCaptureText}
 				></textarea>
 
@@ -604,7 +571,7 @@
 				{:else}
 					<div class="mt-4 rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center">
 						<p class="text-sm text-zinc-400">
-							Ajoute une photo du telephone ou un media rapide, puis sauvegarde ta capture.
+							Ajoute une photo du telephone, ecris son commentaire, puis sauvegarde ta note complete.
 						</p>
 					</div>
 				{/if}
@@ -618,45 +585,34 @@
 	>
 		<div class="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
 			<div class="max-w-3xl">
-				<p class="text-xs uppercase tracking-[0.22em] text-[#8fcaff]">Vault</p>
-				<h1 class="mt-3 text-3xl font-semibold text-white">Notes, prompts, snippets et references</h1>
+				<p class="text-xs uppercase tracking-[0.22em] text-[#8fcaff]">Notes</p>
+				<h1 class="mt-3 text-3xl font-semibold text-white">Notes, idees, photos et memos</h1>
 				<p class="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">
-					Transforme FlowPilot en base personnelle moderne: idees, system prompts, snippets de code,
-					playbooks et references utiles, avec couleurs, pinning et copie rapide.
+					Ton espace personnel pour garder ensemble les notes rapides, les photos commentees et les memos utiles, sans separer cela du reste de FlowPilot.
 				</p>
 			</div>
 
-			<div class="grid gap-3 sm:grid-cols-3">
-				{#each NOTE_TEMPLATES as template}
-					<button
-						class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-left text-sm text-white transition hover:border-white/20 hover:bg-white/[0.04]"
-						type="button"
-						onclick={() => loadTemplate(template.id)}
-					>
-						<p class="font-medium">{template.label}</p>
-						<p class="mt-1 text-xs text-zinc-400">{template.title}</p>
-					</button>
-				{/each}
+			<div class="max-w-md rounded-3xl border border-white/8 bg-black/20 px-4 py-4">
+				<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Mode actuel</p>
+				<p class="mt-2 text-sm text-zinc-300">
+					Ici, on se concentre uniquement sur les notes. Les prompts et snippets reviendront plus tard dans un produit separe.
+				</p>
 			</div>
 		</div>
 	</Card>
 
-	<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+	<div class="grid gap-4 md:grid-cols-3">
 		<Card class="bg-[linear-gradient(135deg,rgba(255,79,216,0.08),transparent_65%),#111]">
-			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Prompts</p>
-			<p class="mt-2 text-3xl font-semibold text-white">{promptCount}</p>
+			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Notes</p>
+			<p class="mt-2 text-3xl font-semibold text-white">{vaultItems.length}</p>
 		</Card>
 		<Card class="bg-[linear-gradient(135deg,rgba(51,153,255,0.08),transparent_65%),#111]">
-			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Snippets</p>
-			<p class="mt-2 text-3xl font-semibold text-white">{snippetCount}</p>
+			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Captures rapides</p>
+			<p class="mt-2 text-3xl font-semibold text-white">{quickCaptureCount}</p>
 		</Card>
 		<Card class="bg-[linear-gradient(135deg,rgba(34,197,94,0.08),transparent_65%),#111]">
-			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">References</p>
-			<p class="mt-2 text-3xl font-semibold text-white">{referenceCount}</p>
-		</Card>
-		<Card class="bg-[linear-gradient(135deg,rgba(245,158,11,0.08),transparent_65%),#111]">
-			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Pinglees</p>
-			<p class="mt-2 text-3xl font-semibold text-white">{pinnedCount}</p>
+			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Notes avec media</p>
+			<p class="mt-2 text-3xl font-semibold text-white">{mediaNoteCount}</p>
 		</Card>
 	</div>
 
@@ -666,7 +622,7 @@
 				<div>
 					<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Editeur</p>
 					<h2 class="mt-2 text-xl font-semibold text-white">
-						{editingId ? 'Modifier un element du Vault' : 'Ajouter un element du Vault'}
+						{editingId ? 'Modifier une note' : 'Ajouter une note'}
 					</h2>
 				</div>
 				{#if editingId}
@@ -690,14 +646,6 @@
 				<div class="grid gap-3 md:grid-cols-2">
 					<select
 						class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none"
-						bind:value={kind}
-					>
-						{#each NOTE_KIND_OPTIONS as option}
-							<option value={option.value}>{option.label}</option>
-						{/each}
-					</select>
-					<select
-						class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none"
 						bind:value={projectId}
 					>
 						<option value="">Aucun projet</option>
@@ -705,6 +653,9 @@
 							<option value={project.id}>{project.title}</option>
 						{/each}
 					</select>
+					<div class="flex items-center rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-zinc-300">
+						Note personnelle ou memo photo
+					</div>
 				</div>
 
 				<div>
@@ -722,14 +673,6 @@
 						{/each}
 					</div>
 				</div>
-
-				{#if kind === 'snippet'}
-					<input
-						class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none transition focus:border-[#3399FF]/40"
-						placeholder="Langage ou format (ex: js, sql, bash)"
-						bind:value={language}
-					/>
-				{/if}
 
 				<input
 					class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none transition focus:border-[#3399FF]/40"
@@ -829,7 +772,7 @@
 
 				<textarea
 					class="min-h-[220px] w-full rounded-3xl border border-white/10 bg-black/20 px-4 py-4 text-sm leading-6 text-white outline-none transition focus:border-[#3399FF]/40"
-					placeholder="Contenu complet de la note, du prompt, du snippet ou de la reference"
+					placeholder="Contenu de la note, commentaire de photo, memo ou idee detaillee"
 					bind:value={content}
 				></textarea>
 
@@ -844,7 +787,7 @@
 						type="button"
 						onclick={submit}
 					>
-						{editingId ? 'Mettre a jour' : 'Ajouter au Vault'}
+						{editingId ? 'Mettre a jour' : 'Ajouter la note'}
 					</button>
 					<button
 						class="rounded-2xl border border-white/10 px-4 py-3 text-sm text-zinc-300"
@@ -862,28 +805,9 @@
 				<div class="flex flex-col gap-3">
 					<input
 						class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none transition focus:border-[#3399FF]/40"
-						placeholder="Rechercher dans le Vault"
+						placeholder="Rechercher dans les notes"
 						bind:value={search}
 					/>
-
-					<div class="flex flex-wrap gap-2">
-						<button
-							class={`rounded-full px-3 py-2 text-xs font-medium transition ${kindFilter === 'all' ? 'bg-white text-black' : 'border border-white/10 text-zinc-300'}`}
-							type="button"
-							onclick={() => (kindFilter = 'all')}
-						>
-							Tout
-						</button>
-						{#each NOTE_KIND_OPTIONS as option}
-							<button
-								class={`rounded-full px-3 py-2 text-xs font-medium transition ${kindFilter === option.value ? 'bg-[#3399FF] text-white' : 'border border-white/10 text-zinc-300'}`}
-								type="button"
-								onclick={() => (kindFilter = option.value)}
-							>
-								{option.label}
-							</button>
-						{/each}
-					</div>
 
 					<div class="flex flex-wrap gap-2">
 						<button
@@ -919,17 +843,10 @@
 							<div class="flex items-start justify-between gap-3">
 								<div class="flex items-center gap-2">
 									<span class={`h-2.5 w-2.5 rounded-full ${item.colors.dot}`}></span>
-									<span class={`rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] ${item.colors.chip}`}>
-										{vaultKindLabel(item.meta.kind)}
-									</span>
+									<span class={`rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] ${item.colors.chip}`}>Note</span>
 									{#if item.meta.pinned}
 										<span class="rounded-full border border-amber-400/20 bg-amber-400/10 px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-amber-200">
 											Pin
-										</span>
-									{/if}
-									{#if item.meta.language}
-										<span class="rounded-full border border-white/10 px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-zinc-300">
-											{item.meta.language}
 										</span>
 									{/if}
 								</div>
@@ -1035,9 +952,9 @@
 					{/each}
 				{:else}
 					<Card class="lg:col-span-2">
-						<p class="text-lg font-medium text-white">Le Vault est vide pour ce filtre</p>
+						<p class="text-lg font-medium text-white">Aucune note pour ce filtre</p>
 						<p class="mt-2 text-sm text-zinc-400">
-							Ajoute une note, un prompt ou un snippet, ou assouplis les filtres actifs.
+							Ajoute une note, une photo commentee, ou assouplis les filtres actifs.
 						</p>
 					</Card>
 				{/if}

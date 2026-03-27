@@ -5,13 +5,13 @@
 	import AccountBadge from '$lib/components/AccountBadge.svelte';
 	import favicon from '$lib/assets/favicon.svg';
 	import AuthGate from '$lib/components/AuthGate.svelte';
-	import QuickCaptureModal from '$lib/components/QuickCaptureModal.svelte';
 	import { NAV_ITEMS, SECONDARY_ITEMS } from '$lib/constants';
+	import { getVaultMeta } from '$lib/note-vault';
 	import {
 		authState,
 		flowpilot,
+		notes,
 		notificationCenter,
-		pendingInboxItems,
 		shellState,
 		syncState
 	} from '$lib/flowpilot';
@@ -24,6 +24,13 @@
 	});
 
 	const isActive = (href: string) => href === '/' ? $page.url.pathname === '/' : $page.url.pathname.startsWith(href);
+	const pageLabel = () =>
+		$page.url.pathname === '/'
+			? 'Accueil'
+			: [...NAV_ITEMS, ...SECONDARY_ITEMS].find((item) => isActive(item.href))?.label ?? $page.url.pathname.slice(1);
+	const noteCount = $derived(
+		$notes.filter((note) => !note.deleted_at && getVaultMeta(note).kind === 'note').length
+	);
 </script>
 
 <svelte:head>
@@ -40,9 +47,9 @@
 	<div class="shell-grid bg-transparent">
 		<aside class="hidden border-r border-white/6 bg-black/20 p-5 lg:flex lg:flex-col">
 			<div class="mb-8">
-				<p class="text-xs uppercase tracking-[0.2em] text-[#3399FF]">FlowPilot</p>
-				<h1 class="mt-2 text-2xl font-semibold text-white">Cockpit</h1>
-				<p class="mt-2 text-sm text-zinc-500">Inbox -> clarifier -> planifier -> focus -> revue.</p>
+				<p class="text-xs uppercase tracking-[0.2em] text-[#3399FF]">FlowPilot Notes</p>
+				<h1 class="mt-2 text-2xl font-semibold text-white">Notebook</h1>
+				<p class="mt-2 text-sm text-zinc-500">Capturer, classer et retrouver tes notes et medias dans un seul espace.</p>
 			</div>
 
 			{#if $authState.user}
@@ -101,7 +108,7 @@
 						Menu
 					</button>
 					<div>
-						<p class="text-sm font-semibold text-white">{$page.url.pathname === '/' ? 'Dashboard' : $page.url.pathname.slice(1)}</p>
+						<p class="text-sm font-semibold text-white">{pageLabel()}</p>
 						<p class="text-xs text-zinc-500">{$syncState.running ? 'sync active' : 'local-first'}</p>
 					</div>
 				</div>
@@ -116,8 +123,8 @@
 							<AccountBadge user={$authState.user} compact />
 						</a>
 					{/if}
-					<a class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300" href="/inbox">
-						Inbox {$pendingInboxItems.length}
+					<a class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300" href="/vault">
+						Notes {noteCount}
 					</a>
 					<button
 						class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300 transition hover:border-white/20 hover:text-white"
@@ -133,34 +140,14 @@
 				{@render children()}
 			</main>
 
-			<button
-				class="fixed bottom-20 left-1/2 z-40 flex h-16 w-16 -translate-x-1/2 items-center justify-center rounded-full bg-[#3399FF] text-3xl text-white shadow-[0_0_24px_rgba(51,153,255,0.22)] transition hover:bg-[#4aa5ff] lg:bottom-8"
-				type="button"
-				aria-label="Ajouter dans l inbox"
-				onclick={() => flowpilot.openQuickCapture()}
-			>
-				+
-			</button>
-
 			<nav class="fixed inset-x-0 bottom-0 z-30 border-t border-white/6 bg-[#0a0a0a]/96 px-2 pb-4 pt-2 backdrop-blur lg:hidden">
-				<div class="grid grid-cols-5 items-center">
-					<a class={`flex flex-col items-center gap-1 rounded-2xl px-2 py-2 text-xs ${isActive('/') ? 'text-white' : 'text-zinc-500'}`} href="/">
-						<span>H</span>
-						<span>Home</span>
-					</a>
-					<a class={`flex flex-col items-center gap-1 rounded-2xl px-2 py-2 text-xs ${isActive('/tasks') ? 'text-white' : 'text-zinc-500'}`} href="/tasks">
-						<span>T</span>
-						<span>Taches</span>
-					</a>
-					<div></div>
-					<a class={`flex flex-col items-center gap-1 rounded-2xl px-2 py-2 text-xs ${isActive('/agenda') ? 'text-white' : 'text-zinc-500'}`} href="/agenda">
-						<span>A</span>
-						<span>Agenda</span>
-					</a>
-					<a class={`flex flex-col items-center gap-1 rounded-2xl px-2 py-2 text-xs ${isActive('/focus') ? 'text-white' : 'text-zinc-500'}`} href="/focus">
-						<span>F</span>
-						<span>Focus</span>
-					</a>
+				<div class="grid items-center" style={`grid-template-columns: repeat(${NAV_ITEMS.length}, minmax(0, 1fr));`}>
+					{#each NAV_ITEMS as item}
+						<a class={`flex flex-col items-center gap-1 rounded-2xl px-2 py-2 text-xs ${isActive(item.href) ? 'text-white' : 'text-zinc-500'}`} href={item.href}>
+							<span>{item.icon}</span>
+							<span>{item.short}</span>
+						</a>
+					{/each}
 				</div>
 			</nav>
 
@@ -205,8 +192,6 @@
 					</div>
 				{/each}
 			</div>
-
-			<QuickCaptureModal />
 		</div>
 	</div>
 {/if}
