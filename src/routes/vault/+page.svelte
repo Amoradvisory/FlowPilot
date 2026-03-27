@@ -60,9 +60,15 @@
 	let attachmentUrl = $state('');
 	let attachmentTitle = $state('');
 	let attachmentKind = $state<VaultAttachmentKind>('link');
+	let quickCaptureText = $state('');
+	let quickCaptureAttachments = $state<VaultAttachment[]>([]);
+	let quickCaptureMessage = $state<string | null>(null);
+	let quickCaptureMessageTone = $state<'error' | 'info'>('info');
 	let mediaMessage = $state<string | null>(null);
 	let mediaMessageTone = $state<'error' | 'info'>('info');
 	let fileInput: HTMLInputElement | null = null;
+	let quickCameraInput: HTMLInputElement | null = null;
+	let quickMediaInput: HTMLInputElement | null = null;
 
 	const vaultItems = $derived(
 		$notes
@@ -109,6 +115,11 @@
 		mediaMessageTone = tone;
 	};
 
+	const setQuickCaptureMessage = (message: string | null, tone: 'error' | 'info' = 'info') => {
+		quickCaptureMessage = message;
+		quickCaptureMessageTone = tone;
+	};
+
 	const formatBytes = (value: number | null) => {
 		if (!value) return null;
 		return value >= 1024 * 1024
@@ -123,6 +134,21 @@
 		} catch {
 			return vaultAttachmentKindLabel(kind);
 		}
+	};
+
+	const resetQuickCapture = () => {
+		quickCaptureText = '';
+		quickCaptureAttachments = [];
+		setQuickCaptureMessage(null);
+		if (quickCameraInput) quickCameraInput.value = '';
+		if (quickMediaInput) quickMediaInput.value = '';
+	};
+
+	const quickCaptureTitle = () => {
+		const firstLine = quickCaptureText.trim().split('\n')[0]?.trim();
+		if (firstLine) return firstLine.slice(0, 72);
+		if (quickCaptureAttachments[0]?.title) return quickCaptureAttachments[0].title;
+		return `Capture rapide ${new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`;
 	};
 
 	const resetForm = () => {
@@ -206,6 +232,18 @@
 		fileInput?.click();
 	};
 
+	const openQuickCamera = () => {
+		quickCameraInput?.click();
+	};
+
+	const openQuickMediaPicker = () => {
+		quickMediaInput?.click();
+	};
+
+	const removeQuickAttachment = (id: string) => {
+		quickCaptureAttachments = quickCaptureAttachments.filter((attachment) => attachment.id !== id);
+	};
+
 	const readFileAsDataUrl = (file: File) =>
 		new Promise<string>((resolve, reject) => {
 			const reader = new FileReader();
@@ -221,40 +259,96 @@
 		return 'link';
 	};
 
-	const handleMediaSelection = async (event: Event) => {
-		const input = event.currentTarget as HTMLInputElement;
-		const files = Array.from(input.files ?? []);
-		if (!files.length) return;
+	const ingestFiles = async (
+		files: File[],
+		append: (incoming: VaultAttachment[]) => void,
+		setMessage: (message: string | null, tone?: 'error' | 'info') => void
+	) => {
+		const incoming: VaultAttachment[] = [];
+		let rejectedCount = 0;
 
 		for (const file of files) {
 			if (file.size > MAX_EMBED_FILE_BYTES) {
-				setMediaMessage(
-					`${file.name} depasse ${formatBytes(MAX_EMBED_FILE_BYTES)}. // V2: basculer les gros medias vers un vrai storage.`,
-					'error'
-				);
+				rejectedCount += 1;
 				continue;
 			}
 
 			try {
 				const dataUrl = await readFileAsDataUrl(file);
-				attachments = [
-					...attachments,
-					{
-						id: crypto.randomUUID(),
-						kind: kindFromMimeType(file.type),
-						title: file.name,
-						url: dataUrl,
-						mimeType: file.type || null,
-						sizeBytes: file.size
-					}
-				];
-				setMediaMessage(`${file.name} integre dans le Vault.`);
+				incoming.push({
+					id: crypto.randomUUID(),
+					kind: kindFromMimeType(file.type),
+					title: file.name,
+					url: dataUrl,
+					mimeType: file.type || null,
+					sizeBytes: file.size
+				});
 			} catch {
-				setMediaMessage(`Impossible de lire ${file.name}.`, 'error');
+				rejectedCount += 1;
 			}
 		}
 
+		if (incoming.length) {
+			append(incoming);
+			setMessage(
+				`${incoming.length} media(s) ajoute(s)${rejectedCount ? `, ${rejectedCount} ignore(s)` : ''}.`,
+				rejectedCount ? 'error' : 'info'
+			);
+			return;
+		}
+
+		if (rejectedCount) {
+			setMessage(
+				`Impossible d'ajouter ces medias. Limite actuelle: ${formatBytes(MAX_EMBED_FILE_BYTES)} par fichier. // V2: storage dedie.`,
+				'error'
+			);
+		}
+	};
+
+	const handleMediaSelection = async (event: Event) => {
+		const input = event.currentTarget as HTMLInputElement;
+		const files = Array.from(input.files ?? []);
+		if (!files.length) return;
+		await ingestFiles(
+			files,
+			(incoming) => {
+				attachments = [...attachments, ...incoming];
+			},
+			setMediaMessage
+		);
 		input.value = '';
+	};
+
+	const handleQuickCaptureSelection = async (event: Event) => {
+		const input = event.currentTarget as HTMLInputElement;
+		const files = Array.from(input.files ?? []);
+		if (!files.length) return;
+		await ingestFiles(
+			files,
+			(incoming) => {
+				quickCaptureAttachments = [...quickCaptureAttachments, ...incoming];
+			},
+			setQuickCaptureMessage
+		);
+		input.value = '';
+	};
+
+	const submitQuickCapture = async () => {
+		if (!quickCaptureText.trim() && !quickCaptureAttachments.length) return;
+
+		await flowpilot.createNote({
+			title: quickCaptureTitle(),
+			content: buildVaultContent(quickCaptureText, quickCaptureAttachments),
+			tags: buildVaultTags({
+				kind: 'note',
+				color: 'slate',
+				pinned: false,
+				plainTags: ['capture-rapide']
+			})
+		});
+
+		resetQuickCapture();
+		setQuickCaptureMessage('Capture rapide ajoutee au Vault.');
 	};
 
 	const submit = async () => {
@@ -326,6 +420,134 @@
 </script>
 
 <div class="space-y-4">
+	<Card
+		tone="active"
+		class="overflow-hidden border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(51,153,255,0.16),transparent_36%),radial-gradient(circle_at_bottom_right,rgba(255,79,216,0.12),transparent_38%),#0f1117]"
+	>
+		<div class="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+			<div>
+				<p class="text-xs uppercase tracking-[0.22em] text-[#8fcaff]">Capture rapide</p>
+				<h1 class="mt-3 text-3xl font-semibold text-white">Une idee, une note ou une photo en quelques secondes</h1>
+				<p class="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">
+					Utilise ce bloc pour capturer vite, sans passer par les prompts ni l'editeur complet.
+				</p>
+
+				<textarea
+					class="mt-4 min-h-[180px] w-full rounded-3xl border border-white/10 bg-black/20 px-4 py-4 text-sm leading-6 text-white outline-none transition focus:border-[#3399FF]/40"
+					placeholder="Note rapide, idee, chose a ne pas oublier..."
+					bind:value={quickCaptureText}
+				></textarea>
+
+				<div class="mt-4 flex flex-wrap gap-2">
+					<button
+						class="rounded-2xl bg-[#3399FF] px-4 py-3 text-sm font-semibold text-white shadow-[0_0_18px_rgba(51,153,255,0.15)]"
+						type="button"
+						onclick={submitQuickCapture}
+					>
+						Sauver la note
+					</button>
+					<button
+						class="rounded-2xl border border-white/10 px-4 py-3 text-sm text-white"
+						type="button"
+						onclick={openQuickCamera}
+					>
+						Prendre une photo
+					</button>
+					<button
+						class="rounded-2xl bg-[#FF4FD8] px-4 py-3 text-sm font-medium text-white shadow-[0_0_18px_rgba(255,79,216,0.14)]"
+						type="button"
+						onclick={openQuickMediaPicker}
+					>
+						Ajouter un media
+					</button>
+				</div>
+
+				<input
+					class="hidden"
+					type="file"
+					accept="image/*"
+					capture="environment"
+					bind:this={quickCameraInput}
+					onchange={handleQuickCaptureSelection}
+				/>
+				<input
+					class="hidden"
+					type="file"
+					accept="image/*,video/*,audio/*"
+					multiple
+					bind:this={quickMediaInput}
+					onchange={handleQuickCaptureSelection}
+				/>
+
+				{#if quickCaptureMessage}
+					<p class={`mt-3 text-sm ${quickCaptureMessageTone === 'error' ? 'text-rose-300' : 'text-[#8fcaff]'}`}>
+						{quickCaptureMessage}
+					</p>
+				{/if}
+			</div>
+
+			<div class="rounded-3xl border border-white/8 bg-black/20 p-4">
+				<div class="flex items-center justify-between gap-3">
+					<div>
+						<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Pieces jointes rapides</p>
+						<p class="mt-2 text-sm text-zinc-400">
+							{quickCaptureAttachments.length} media(s) pret(s) a etre sauves avec la note.
+						</p>
+					</div>
+					{#if quickCaptureAttachments.length}
+						<button
+							class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300"
+							type="button"
+							onclick={resetQuickCapture}
+						>
+							Vider
+						</button>
+					{/if}
+				</div>
+
+				{#if quickCaptureAttachments.length}
+					<div class="mt-4 grid gap-3 sm:grid-cols-2">
+						{#each quickCaptureAttachments as attachment}
+							<div class="overflow-hidden rounded-2xl border border-white/8 bg-black/25">
+								{#if isImageAttachment(attachment)}
+									<img class="h-36 w-full object-cover" src={attachment.url} alt={attachment.title} />
+								{:else}
+									<div class="flex h-36 items-center justify-center bg-white/[0.03] px-4 text-center text-sm text-zinc-300">
+										{vaultAttachmentKindLabel(attachment.kind)}
+									</div>
+								{/if}
+								<div class="flex items-center justify-between gap-3 px-4 py-3">
+									<div class="min-w-0">
+										<p class="truncate text-sm font-medium text-white">{attachment.title}</p>
+										<p class="mt-1 text-xs text-zinc-400">
+											{vaultAttachmentKindLabel(attachment.kind)}
+											{#if formatBytes(attachment.sizeBytes)}
+												- {formatBytes(attachment.sizeBytes)}
+											{/if}
+										</p>
+									</div>
+									<button
+										class="rounded-full border border-red-500/20 px-3 py-1 text-xs text-red-300"
+										type="button"
+										onclick={() => removeQuickAttachment(attachment.id)}
+									>
+										Retirer
+									</button>
+								</div>
+							</div>
+						{/each}
+					</div>
+				{:else}
+					<div class="mt-4 rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center">
+						<p class="text-sm text-zinc-400">
+							Ajoute une photo du telephone ou un media rapide, puis sauvegarde ta capture.
+						</p>
+					</div>
+				{/if}
+			</div>
+		</div>
+	</Card>
+
 	<Card
 		tone="active"
 		class="overflow-hidden border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(51,153,255,0.18),transparent_38%),radial-gradient(circle_at_top_right,rgba(255,79,216,0.14),transparent_36%),#101114]"
