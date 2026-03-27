@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Card from '$lib/components/Card.svelte';
 	import { flowpilot, notes } from '$lib/flowpilot';
+	import { analyzeQuickCapture } from '$lib/nexus-notes';
 	import {
 		buildVaultTags,
 		getLifeStateMeta,
@@ -37,10 +38,15 @@
 	let quickCaptureMessage = $state<string | null>(null);
 	let quickCaptureMessageTone = $state<'error' | 'info'>('info');
 	let lastQuickCaptureId = $state<string | null>(null);
-	let quickPriority = $state<NotePriorityLevel>('p3');
-	let quickLifeState = $state<NoteLifeState>('seed');
+	let quickPriority = $state<NotePriorityLevel | null>(null);
+	let quickLifeState = $state<NoteLifeState | null>(null);
 	let quickCameraInput: HTMLInputElement | null = null;
 	let quickMediaInput: HTMLInputElement | null = null;
+	const quickPreset = $derived(
+		analyzeQuickCapture(quickCaptureText, quickCaptureAttachments.length)
+	);
+	const effectiveQuickPriority = $derived(quickPriority ?? quickPreset.priority);
+	const effectiveQuickLifeState = $derived(quickLifeState ?? quickPreset.lifeState);
 
 	const noteItems = $derived(
 		$notes
@@ -57,7 +63,10 @@
 				};
 			})
 			.filter((item): item is QuickNoteItem => Boolean(item))
-			.sort((left, right) => new Date(right.note.updated_at).getTime() - new Date(left.note.updated_at).getTime())
+			.sort(
+				(left, right) =>
+					new Date(right.note.updated_at).getTime() - new Date(left.note.updated_at).getTime()
+			)
 	);
 
 	const recentNotes = $derived(noteItems.slice(0, 4));
@@ -77,15 +86,15 @@
 	const resetQuickCapture = () => {
 		quickCaptureText = '';
 		quickCaptureAttachments = [];
-		quickPriority = 'p3';
-		quickLifeState = 'seed';
+		quickPriority = null;
+		quickLifeState = null;
 		setQuickCaptureMessage(null);
 		if (quickCameraInput) quickCameraInput.value = '';
 		if (quickMediaInput) quickMediaInput.value = '';
 	};
 
 	const quickCaptureTitle = () => {
-		const firstLine = quickCaptureText.trim().split('\n')[0]?.trim();
+		const firstLine = quickPreset.cleanText.trim().split('\n')[0]?.trim();
 		if (firstLine) return firstLine.slice(0, 72);
 		if (quickCaptureAttachments[0]?.title) return quickCaptureAttachments[0].title;
 		return `Note rapide ${new Date().toLocaleString('fr-FR', {
@@ -178,14 +187,14 @@
 
 		const savedNote = await flowpilot.createNote({
 			title: quickCaptureTitle(),
-			content: buildVaultContent(quickCaptureText, quickCaptureAttachments),
+			content: buildVaultContent(quickPreset.cleanText, quickCaptureAttachments),
 			tags: buildVaultTags({
 				kind: 'note',
-				color: 'slate',
+				color: quickPreset.color,
 				pinned: false,
-				priority: quickPriority,
-				lifeState: quickLifeState,
-				plainTags: ['capture-rapide']
+				priority: effectiveQuickPriority,
+				lifeState: effectiveQuickLifeState,
+				plainTags: quickPreset.tags
 			})
 		});
 
@@ -203,31 +212,78 @@
 		<div>
 			<div class="flex items-center justify-between gap-3">
 				<div>
-					<p class="text-xs uppercase tracking-[0.22em] text-[#8fcaff]">Notes rapides</p>
-					<h1 class="mt-3 text-3xl font-semibold text-white">Une idee, une photo, un commentaire</h1>
+					<p class="text-xs tracking-[0.22em] text-[#8fcaff] uppercase">Notes rapides</p>
+					<h1 class="mt-3 text-3xl font-semibold text-white">
+						Une idee, une photo, un commentaire
+					</h1>
 					<p class="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">
-						Comme dans une app de notes moderne: prends une photo, ajoute un commentaire ou un contexte, puis retrouve-la avec le reste de ta journee.
+						Comme dans une app de notes moderne: prends une photo, ajoute un commentaire ou un
+						contexte, puis retrouve-la avec le reste de ta journee.
+					</p>
+					<p class="mt-3 text-xs tracking-[0.16em] text-zinc-500 uppercase">
+						Commandes rapides: /todo /meeting /idea /later - tags inline: #projet-x #urgent
 					</p>
 				</div>
-				<a class="hidden rounded-2xl border border-white/10 px-4 py-3 text-sm text-white lg:inline-flex" href="/vault">
+				<a
+					class="hidden rounded-2xl border border-white/10 px-4 py-3 text-sm text-white lg:inline-flex"
+					href="/vault"
+				>
 					Toutes les notes
 				</a>
 			</div>
 
 			<textarea
-				class="mt-4 min-h-[180px] w-full rounded-3xl border border-white/10 bg-black/20 px-4 py-4 text-sm leading-6 text-white outline-none transition focus:border-[#3399FF]/40"
+				class="mt-4 min-h-[180px] w-full rounded-3xl border border-white/10 bg-black/20 px-4 py-4 text-sm leading-6 text-white transition outline-none focus:border-[#3399FF]/40"
 				placeholder="Note rapide, commentaire de photo, idee ou chose a ne pas oublier..."
 				bind:value={quickCaptureText}
 			></textarea>
 
+			<div class="mt-4 flex flex-wrap gap-2">
+				{#each ['todo', 'meeting', 'idea', 'later'] as command}
+					<button
+						class={`rounded-full border px-3 py-1.5 text-xs transition ${quickPreset.command === command ? 'border-white/25 bg-white/10 text-white' : 'border-white/10 text-zinc-400'}`}
+						type="button"
+						onclick={() => {
+							quickPriority = null;
+							quickLifeState = null;
+							quickCaptureText = `/${command} ${quickPreset.cleanText}`.trim();
+						}}
+					>
+						/{command}
+					</button>
+				{/each}
+			</div>
+
+			<div class="mt-4 rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
+				<div class="flex flex-wrap items-center gap-2 text-xs">
+					<span class="rounded-full border border-white/10 px-2.5 py-1 text-zinc-300">
+						Contexte: {quickPreset.contextLabel}
+					</span>
+					<span
+						class="rounded-full border px-2.5 py-1"
+						style={`border-color: ${getPriorityMeta(effectiveQuickPriority).accent}44; background: ${getPriorityMeta(effectiveQuickPriority).accent}18; color: ${getPriorityMeta(effectiveQuickPriority).accent};`}
+					>
+						{getPriorityMeta(effectiveQuickPriority).shortLabel}
+					</span>
+					<span class="rounded-full border border-white/10 px-2.5 py-1 text-zinc-300">
+						{getLifeStateMeta(effectiveQuickLifeState).icon}
+						{getLifeStateMeta(effectiveQuickLifeState).label}
+					</span>
+					{#each quickPreset.tags.filter((tag) => tag !== 'capture-rapide').slice(0, 6) as tag}
+						<span class="rounded-full border border-white/10 px-2.5 py-1 text-zinc-400">#{tag}</span
+						>
+					{/each}
+				</div>
+			</div>
+
 			<div class="mt-4 grid gap-3 md:grid-cols-2">
 				<div>
-					<p class="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">Priorite</p>
+					<p class="mb-2 text-xs tracking-[0.2em] text-zinc-500 uppercase">Priorite</p>
 					<div class="flex flex-wrap gap-2">
 						{#each NOTE_PRIORITY_OPTIONS as option}
 							<button
-								class={`rounded-full border px-3 py-2 text-xs font-medium transition ${quickPriority === option.value ? 'text-white shadow-[0_0_18px_rgba(255,255,255,0.08)]' : 'border-white/10 text-zinc-400'}`}
-								style={`border-color: ${quickPriority === option.value ? `${option.accent}66` : ''}; background: linear-gradient(135deg, ${option.accent}22, rgba(15,22,41,0.95));`}
+								class={`rounded-full border px-3 py-2 text-xs font-medium transition ${effectiveQuickPriority === option.value ? 'text-white shadow-[0_0_18px_rgba(255,255,255,0.08)]' : 'border-white/10 text-zinc-400'}`}
+								style={`border-color: ${effectiveQuickPriority === option.value ? `${option.accent}66` : ''}; background: linear-gradient(135deg, ${option.accent}22, rgba(15,22,41,0.95));`}
 								type="button"
 								onclick={() => (quickPriority = option.value)}
 							>
@@ -235,21 +291,28 @@
 							</button>
 						{/each}
 					</div>
+					<p class="mt-2 text-xs text-zinc-500">
+						Tu peux aussi laisser le systeme choisir automatiquement.
+					</p>
 				</div>
 
 				<div>
-					<p class="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">Etat</p>
+					<p class="mb-2 text-xs tracking-[0.2em] text-zinc-500 uppercase">Etat</p>
 					<div class="flex flex-wrap gap-2">
 						{#each NOTE_LIFE_STATE_OPTIONS as option}
 							<button
-								class={`rounded-full border px-3 py-2 text-xs font-medium transition ${quickLifeState === option.value ? 'border-white/30 bg-white/8 text-white' : 'border-white/10 text-zinc-400'}`}
+								class={`rounded-full border px-3 py-2 text-xs font-medium transition ${effectiveQuickLifeState === option.value ? 'border-white/30 bg-white/8 text-white' : 'border-white/10 text-zinc-400'}`}
 								type="button"
 								onclick={() => (quickLifeState = option.value)}
 							>
-								{option.icon} {option.label}
+								{option.icon}
+								{option.label}
 							</button>
 						{/each}
 					</div>
+					<p class="mt-2 text-xs text-zinc-500">
+						La valeur manuelle prend le dessus si tu la selectionnes.
+					</p>
 				</div>
 			</div>
 
@@ -295,7 +358,9 @@
 			/>
 
 			{#if quickCaptureMessage}
-				<p class={`mt-3 text-sm ${quickCaptureMessageTone === 'error' ? 'text-rose-300' : 'text-[#8fcaff]'}`}>
+				<p
+					class={`mt-3 text-sm ${quickCaptureMessageTone === 'error' ? 'text-rose-300' : 'text-[#8fcaff]'}`}
+				>
 					{quickCaptureMessage}
 				</p>
 			{/if}
@@ -304,12 +369,14 @@
 				<div class="mt-5 rounded-3xl border border-white/8 bg-black/20 p-4">
 					<div class="flex items-center justify-between gap-3">
 						<div>
-							<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Dernieres notes</p>
+							<p class="text-xs tracking-[0.2em] text-zinc-500 uppercase">Dernieres notes</p>
 							<p class="mt-2 text-sm text-zinc-400">
 								Les notes les plus recentes restent visibles ici, sans changer d'ecran.
 							</p>
 						</div>
-						<p class="text-xs uppercase tracking-[0.16em] text-zinc-500">{recentNotes.length} visible(s)</p>
+						<p class="text-xs tracking-[0.16em] text-zinc-500 uppercase">
+							{recentNotes.length} visible(s)
+						</p>
 					</div>
 
 					<div class="mt-4 space-y-3">
@@ -321,31 +388,38 @@
 										: item.colors.card
 								}`}
 								href="/vault"
-								>
-									<div class="flex items-start justify-between gap-3">
-										<div class="min-w-0">
-											<p class="truncate text-sm font-medium text-white">{item.note.title}</p>
+							>
+								<div class="flex items-start justify-between gap-3">
+									<div class="min-w-0">
+										<p class="truncate text-sm font-medium text-white">{item.note.title}</p>
 										{#if item.document.plainText}
 											<p class="mt-1 max-h-10 overflow-hidden text-sm leading-5 text-zinc-400">
 												{item.document.plainText}
 											</p>
 										{:else if item.document.attachments.length}
-											<p class="mt-1 text-sm text-zinc-400">{item.document.attachments.length} media(s) joint(s)</p>
+											<p class="mt-1 text-sm text-zinc-400">
+												{item.document.attachments.length} media(s) joint(s)
+											</p>
 										{/if}
 									</div>
-										<div class="shrink-0 text-right">
-											<p
-												class={`text-xs uppercase tracking-[0.16em] ${item.meta.priority === 'p0' ? 'animate-pulse' : ''}`}
-												style={`color: ${getPriorityMeta(item.meta.priority).accent};`}
-											>
-												{getPriorityMeta(item.meta.priority).shortLabel}
-											</p>
-											<p class="mt-1 text-xs text-zinc-500">{getLifeStateMeta(item.meta.lifeState).icon}</p>
-											<p class="mt-1 text-xs text-zinc-400">
-												{new Date(item.note.updated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-											</p>
-										</div>
+									<div class="shrink-0 text-right">
+										<p
+											class={`text-xs tracking-[0.16em] uppercase ${item.meta.priority === 'p0' ? 'animate-pulse' : ''}`}
+											style={`color: ${getPriorityMeta(item.meta.priority).accent};`}
+										>
+											{getPriorityMeta(item.meta.priority).shortLabel}
+										</p>
+										<p class="mt-1 text-xs text-zinc-500">
+											{getLifeStateMeta(item.meta.lifeState).icon}
+										</p>
+										<p class="mt-1 text-xs text-zinc-400">
+											{new Date(item.note.updated_at).toLocaleTimeString('fr-FR', {
+												hour: '2-digit',
+												minute: '2-digit'
+											})}
+										</p>
 									</div>
+								</div>
 							</a>
 						{/each}
 					</div>
@@ -356,7 +430,7 @@
 		<div class="rounded-3xl border border-white/8 bg-black/20 p-4">
 			<div class="flex items-center justify-between gap-3">
 				<div>
-					<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Photo et medias</p>
+					<p class="text-xs tracking-[0.2em] text-zinc-500 uppercase">Photo et medias</p>
 					<p class="mt-2 text-sm text-zinc-400">
 						{quickCaptureAttachments.length} media(s) pret(s) a etre sauves avec la note.
 					</p>
@@ -379,7 +453,9 @@
 							{#if isImageAttachment(attachment)}
 								<img class="h-36 w-full object-cover" src={attachment.url} alt={attachment.title} />
 							{:else}
-								<div class="flex h-36 items-center justify-center bg-white/[0.03] px-4 text-center text-sm text-zinc-300">
+								<div
+									class="flex h-36 items-center justify-center bg-white/[0.03] px-4 text-center text-sm text-zinc-300"
+								>
 									{vaultAttachmentKindLabel(attachment.kind)}
 								</div>
 							{/if}

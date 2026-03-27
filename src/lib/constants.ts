@@ -56,12 +56,10 @@ export const NAV_ITEMS = [
 	{ href: '/', label: 'Accueil', short: 'Home', icon: 'H' },
 	{ href: '/vault', label: 'Notes', short: 'Notes', icon: 'N' },
 	{ href: '/media', label: 'Medias', short: 'Media', icon: 'M' },
-	{ href: '/collections', label: 'Classement', short: 'Classer', icon: 'C' }
+	{ href: '/collections', label: 'Constellation', short: 'Graph', icon: 'C' }
 ] as const;
 
-export const SECONDARY_ITEMS = [
-	{ href: '/settings', label: 'Parametres' }
-] as const;
+export const SECONDARY_ITEMS = [{ href: '/settings', label: 'Parametres' }] as const;
 
 export const WEEK_DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 

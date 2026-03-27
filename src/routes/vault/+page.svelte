@@ -1,15 +1,14 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import Card from '$lib/components/Card.svelte';
-	import { flowpilot, notes, projects } from '$lib/flowpilot';
-	import type { Note, Project } from '$lib/types';
+	import { flowpilot, notes } from '$lib/flowpilot';
+	import { findRelatedNotes, matchesNoteQuery, type NoteIndexItem } from '$lib/nexus-notes';
 	import {
 		buildVaultTags,
 		getDecayMeta,
 		getLifeStateMeta,
 		getPriorityMeta,
 		getVaultMeta,
-		matchVaultQuery,
 		NOTE_LIFE_STATE_OPTIONS,
 		NOTE_COLOR_OPTIONS,
 		NOTE_PRIORITY_OPTIONS,
@@ -34,11 +33,11 @@
 		type VaultDocument,
 		vaultAttachmentKindLabel
 	} from '$lib/vault-document';
+	import type { Note } from '$lib/types';
 
-	type VaultItem = {
+	type VaultItem = NoteIndexItem & {
 		note: Note;
 		meta: VaultMeta;
-		project: Project | null;
 		document: VaultDocument;
 		colors: ReturnType<typeof noteColorClasses>;
 	};
@@ -48,6 +47,7 @@
 	let search = $state('');
 	let colorFilter = $state<'all' | VaultColor>('all');
 	let pinnedOnly = $state(false);
+	let showArchived = $state(false);
 	let editingId = $state<string | null>(null);
 	let title = $state('');
 	let content = $state('');
@@ -55,24 +55,15 @@
 	let priority = $state<NotePriorityLevel>('p3');
 	let lifeState = $state<NoteLifeState>('seed');
 	let tagInput = $state('');
-	let projectId = $state('');
 	let pinned = $state(false);
-	let showArchived = $state(false);
 	let copyMessage = $state<string | null>(null);
 	let attachments = $state<VaultAttachment[]>([]);
 	let attachmentUrl = $state('');
 	let attachmentTitle = $state('');
 	let attachmentKind = $state<VaultAttachmentKind>('link');
-	let quickCaptureText = $state('');
-	let quickCaptureAttachments = $state<VaultAttachment[]>([]);
-	let quickCaptureMessage = $state<string | null>(null);
-	let quickCaptureMessageTone = $state<'error' | 'info'>('info');
-	let lastQuickCaptureId = $state<string | null>(null);
 	let mediaMessage = $state<string | null>(null);
 	let mediaMessageTone = $state<'error' | 'info'>('info');
 	let fileInput: HTMLInputElement | null = null;
-	let quickCameraInput: HTMLInputElement | null = null;
-	let quickMediaInput: HTMLInputElement | null = null;
 
 	const vaultItems = $derived(
 		$notes
@@ -84,15 +75,16 @@
 				return {
 					note,
 					meta,
-					project: $projects.find((project) => project.id === note.project_id) ?? null,
 					document,
 					colors: noteColorClasses(meta.color)
 				};
 			})
 			.filter((item): item is VaultItem => Boolean(item))
 			.sort((left, right) => {
-				if (left.meta.pinned !== right.meta.pinned) return Number(right.meta.pinned) - Number(left.meta.pinned);
-				if (left.meta.priority !== right.meta.priority) return priorityOrder(left.meta.priority) - priorityOrder(right.meta.priority);
+				if (left.meta.pinned !== right.meta.pinned)
+					return Number(right.meta.pinned) - Number(left.meta.pinned);
+				if (left.meta.priority !== right.meta.priority)
+					return priorityOrder(left.meta.priority) - priorityOrder(right.meta.priority);
 				return new Date(right.note.updated_at).getTime() - new Date(left.note.updated_at).getTime();
 			})
 	);
@@ -102,34 +94,24 @@
 			if (!showArchived && item.meta.priority === 'p4') return false;
 			if (colorFilter !== 'all' && item.meta.color !== colorFilter) return false;
 			if (pinnedOnly && !item.meta.pinned) return false;
-			return matchVaultQuery(item.note, search);
+			return matchesNoteQuery(item, search);
 		})
 	);
 
-	const recentQuickCaptures = $derived(
-		vaultItems
-			.filter((item: VaultItem) => item.meta.plainTags.includes('capture-rapide'))
-			.slice(0, 4)
-	);
-
-	const quickCaptureCount = $derived(
-		vaultItems.filter((item: VaultItem) => item.meta.plainTags.includes('capture-rapide')).length
+	const ghostNoteCount = $derived(
+		vaultItems.filter((item: VaultItem) => getDecayMeta(item.note, item.meta).band === 'ghost')
+			.length
 	);
 	const mediaNoteCount = $derived(
 		vaultItems.filter((item: VaultItem) => item.document.attachments.length > 0).length
 	);
-	const ghostNoteCount = $derived(
-		vaultItems.filter((item: VaultItem) => getDecayMeta(item.note, item.meta).band === 'ghost').length
+	const relatedNoteMap = $derived.by(
+		() => new Map(vaultItems.map((item) => [item.note.id, findRelatedNotes(item, vaultItems, 3)]))
 	);
 
 	const setMediaMessage = (message: string | null, tone: 'error' | 'info' = 'info') => {
 		mediaMessage = message;
 		mediaMessageTone = tone;
-	};
-
-	const setQuickCaptureMessage = (message: string | null, tone: 'error' | 'info' = 'info') => {
-		quickCaptureMessage = message;
-		quickCaptureMessageTone = tone;
 	};
 
 	const formatBytes = (value: number | null) => {
@@ -148,21 +130,6 @@
 		}
 	};
 
-	const resetQuickCapture = () => {
-		quickCaptureText = '';
-		quickCaptureAttachments = [];
-		setQuickCaptureMessage(null);
-		if (quickCameraInput) quickCameraInput.value = '';
-		if (quickMediaInput) quickMediaInput.value = '';
-	};
-
-	const quickCaptureTitle = () => {
-		const firstLine = quickCaptureText.trim().split('\n')[0]?.trim();
-		if (firstLine) return firstLine.slice(0, 72);
-		if (quickCaptureAttachments[0]?.title) return quickCaptureAttachments[0].title;
-		return `Capture rapide ${new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`;
-	};
-
 	const resetForm = () => {
 		editingId = null;
 		title = '';
@@ -171,7 +138,6 @@
 		priority = 'p3';
 		lifeState = 'seed';
 		tagInput = '';
-		projectId = '';
 		pinned = false;
 		attachments = [];
 		attachmentUrl = '';
@@ -190,7 +156,6 @@
 		priority = current.meta.priority;
 		lifeState = current.meta.lifeState;
 		tagInput = current.meta.plainTags.join(', ');
-		projectId = current.note.project_id ?? '';
 		pinned = current.meta.pinned;
 		attachments = current.document.attachments.map((attachment) => ({ ...attachment }));
 		attachmentUrl = '';
@@ -202,7 +167,8 @@
 	const addLinkAttachment = () => {
 		const url = attachmentUrl.trim();
 		if (!url) return;
-		const detectedKind = attachmentKind === 'link' ? detectAttachmentKindFromUrl(url) : attachmentKind;
+		const detectedKind =
+			attachmentKind === 'link' ? detectAttachmentKindFromUrl(url) : attachmentKind;
 		attachments = [
 			...attachments,
 			{
@@ -228,18 +194,6 @@
 		fileInput?.click();
 	};
 
-	const openQuickCamera = () => {
-		quickCameraInput?.click();
-	};
-
-	const openQuickMediaPicker = () => {
-		quickMediaInput?.click();
-	};
-
-	const removeQuickAttachment = (id: string) => {
-		quickCaptureAttachments = quickCaptureAttachments.filter((attachment) => attachment.id !== id);
-	};
-
 	const readFileAsDataUrl = (file: File) =>
 		new Promise<string>((resolve, reject) => {
 			const reader = new FileReader();
@@ -255,11 +209,7 @@
 		return 'link';
 	};
 
-	const ingestFiles = async (
-		files: File[],
-		append: (incoming: VaultAttachment[]) => void,
-		setMessage: (message: string | null, tone?: 'error' | 'info') => void
-	) => {
+	const ingestFiles = async (files: File[]) => {
 		const incoming: VaultAttachment[] = [];
 		let rejectedCount = 0;
 
@@ -285,8 +235,8 @@
 		}
 
 		if (incoming.length) {
-			append(incoming);
-			setMessage(
+			attachments = [...attachments, ...incoming];
+			setMediaMessage(
 				`${incoming.length} media(s) ajoute(s)${rejectedCount ? `, ${rejectedCount} ignore(s)` : ''}.`,
 				rejectedCount ? 'error' : 'info'
 			);
@@ -294,7 +244,7 @@
 		}
 
 		if (rejectedCount) {
-			setMessage(
+			setMediaMessage(
 				`Impossible d'ajouter ces medias. Limite actuelle: ${formatBytes(MAX_EMBED_FILE_BYTES)} par fichier. // V2: storage dedie.`,
 				'error'
 			);
@@ -305,52 +255,12 @@
 		const input = event.currentTarget as HTMLInputElement;
 		const files = Array.from(input.files ?? []);
 		if (!files.length) return;
-		await ingestFiles(
-			files,
-			(incoming) => {
-				attachments = [...attachments, ...incoming];
-			},
-			setMediaMessage
-		);
+		await ingestFiles(files);
 		input.value = '';
-	};
-
-	const handleQuickCaptureSelection = async (event: Event) => {
-		const input = event.currentTarget as HTMLInputElement;
-		const files = Array.from(input.files ?? []);
-		if (!files.length) return;
-		await ingestFiles(
-			files,
-			(incoming) => {
-				quickCaptureAttachments = [...quickCaptureAttachments, ...incoming];
-			},
-			setQuickCaptureMessage
-		);
-		input.value = '';
-	};
-
-	const submitQuickCapture = async () => {
-		if (!quickCaptureText.trim() && !quickCaptureAttachments.length) return;
-
-		const savedNote = await flowpilot.createNote({
-			title: quickCaptureTitle(),
-			content: buildVaultContent(quickCaptureText, quickCaptureAttachments),
-			tags: buildVaultTags({
-				kind: 'note',
-				color: 'slate',
-				pinned: false,
-				plainTags: ['capture-rapide']
-			})
-		});
-
-		lastQuickCaptureId = savedNote?.id ?? null;
-		resetQuickCapture();
-		setQuickCaptureMessage('Capture rapide ajoutee aux notes. Elle apparait juste en dessous.');
 	};
 
 	const submit = async () => {
 		const trimmedContent = content.trim();
-		const plainTags = parseTagInput(tagInput);
 		const nextTitle =
 			title.trim() ||
 			trimmedContent.split('\n')[0].trim().slice(0, 72) ||
@@ -360,14 +270,14 @@
 		const payload = {
 			title: nextTitle,
 			content: buildVaultContent(trimmedContent, attachments),
-			project_id: projectId || null,
+			project_id: null,
 			tags: buildVaultTags({
 				kind: 'note',
 				color,
 				pinned,
 				priority,
 				lifeState,
-				plainTags
+				plainTags: parseTagInput(tagInput)
 			})
 		};
 
@@ -401,7 +311,7 @@
 		await flowpilot.createNote({
 			title: `${current.note.title} copie`,
 			content: current.note.content,
-			project_id: current.note.project_id,
+			project_id: null,
 			tags: current.note.tags
 		});
 	};
@@ -421,234 +331,42 @@
 <div class="space-y-4">
 	<Card
 		tone="active"
-		class="overflow-hidden border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(51,153,255,0.16),transparent_36%),radial-gradient(circle_at_bottom_right,rgba(255,79,216,0.12),transparent_38%),#0f1117]"
-	>
-		<div class="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
-			<div>
-				<p class="text-xs uppercase tracking-[0.22em] text-[#8fcaff]">Capture rapide</p>
-				<h1 class="mt-3 text-3xl font-semibold text-white">Une idee, une note ou une photo en quelques secondes</h1>
-				<p class="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">
-					Utilise ce bloc pour capturer vite une idee, une photo et son commentaire, sans quitter ton flux.
-				</p>
-
-				<textarea
-					class="mt-4 min-h-[180px] w-full rounded-3xl border border-white/10 bg-black/20 px-4 py-4 text-sm leading-6 text-white outline-none transition focus:border-[#3399FF]/40"
-					placeholder="Note rapide, commentaire de photo, idee ou chose a ne pas oublier..."
-					bind:value={quickCaptureText}
-				></textarea>
-
-				<div class="mt-4 flex flex-wrap gap-2">
-					<button
-						class="rounded-2xl bg-[#3399FF] px-4 py-3 text-sm font-semibold text-white shadow-[0_0_18px_rgba(51,153,255,0.15)]"
-						type="button"
-						onclick={submitQuickCapture}
-					>
-						Sauver la note
-					</button>
-					<button
-						class="rounded-2xl border border-white/10 px-4 py-3 text-sm text-white"
-						type="button"
-						onclick={openQuickCamera}
-					>
-						Prendre une photo
-					</button>
-					<button
-						class="rounded-2xl bg-[#FF4FD8] px-4 py-3 text-sm font-medium text-white shadow-[0_0_18px_rgba(255,79,216,0.14)]"
-						type="button"
-						onclick={openQuickMediaPicker}
-					>
-						Ajouter un media
-					</button>
-				</div>
-
-				<input
-					class="hidden"
-					type="file"
-					accept="image/*"
-					capture="environment"
-					bind:this={quickCameraInput}
-					onchange={handleQuickCaptureSelection}
-				/>
-				<input
-					class="hidden"
-					type="file"
-					accept="image/*,video/*,audio/*"
-					multiple
-					bind:this={quickMediaInput}
-					onchange={handleQuickCaptureSelection}
-				/>
-
-				{#if quickCaptureMessage}
-					<p class={`mt-3 text-sm ${quickCaptureMessageTone === 'error' ? 'text-rose-300' : 'text-[#8fcaff]'}`}>
-						{quickCaptureMessage}
-					</p>
-				{/if}
-
-				{#if recentQuickCaptures.length}
-					<div class="mt-5 rounded-3xl border border-white/8 bg-black/20 p-4">
-						<div class="flex items-center justify-between gap-3">
-							<div>
-								<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Dernieres captures rapides</p>
-								<p class="mt-2 text-sm text-zinc-400">
-									Retrouve tout de suite les dernieres notes saisies ici.
-								</p>
-							</div>
-							<p class="text-xs uppercase tracking-[0.16em] text-zinc-500">
-								{recentQuickCaptures.length} visible(s)
-							</p>
-						</div>
-
-						<div class="mt-4 space-y-3">
-							{#each recentQuickCaptures as item}
-								<button
-									class={`w-full rounded-2xl border px-4 py-3 text-left transition ${
-										item.note.id === lastQuickCaptureId
-											? 'border-[#3399FF]/40 bg-[#3399FF]/10 shadow-[0_0_20px_rgba(51,153,255,0.12)]'
-											: 'border-white/8 bg-white/[0.03] hover:border-white/14'
-									}`}
-									type="button"
-									onclick={() => startEdit(item.note.id)}
-								>
-									<div class="flex items-start justify-between gap-3">
-										<div class="min-w-0">
-											<p class="truncate text-sm font-medium text-white">{item.note.title}</p>
-											{#if item.document.plainText}
-												<p class="mt-1 max-h-10 overflow-hidden text-sm leading-5 text-zinc-400">
-													{item.document.plainText}
-												</p>
-											{:else if item.document.attachments.length}
-												<p class="mt-1 text-sm text-zinc-400">
-													{item.document.attachments.length} media(s) joint(s)
-												</p>
-											{/if}
-										</div>
-										<div class="shrink-0 text-right">
-											<p class="text-xs uppercase tracking-[0.16em] text-zinc-500">
-												{item.note.id === lastQuickCaptureId ? 'Nouvelle' : 'Capture'}
-											</p>
-											<p class="mt-1 text-xs text-zinc-400">
-												{new Date(item.note.updated_at).toLocaleTimeString('fr-FR', {
-													hour: '2-digit',
-													minute: '2-digit'
-												})}
-											</p>
-										</div>
-									</div>
-								</button>
-							{/each}
-						</div>
-					</div>
-				{/if}
-			</div>
-
-			<div class="rounded-3xl border border-white/8 bg-black/20 p-4">
-				<div class="flex items-center justify-between gap-3">
-					<div>
-						<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Pieces jointes rapides</p>
-						<p class="mt-2 text-sm text-zinc-400">
-							{quickCaptureAttachments.length} media(s) pret(s) a etre sauves avec la note.
-						</p>
-					</div>
-					{#if quickCaptureAttachments.length}
-						<button
-							class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300"
-							type="button"
-							onclick={resetQuickCapture}
-						>
-							Vider
-						</button>
-					{/if}
-				</div>
-
-				{#if quickCaptureAttachments.length}
-					<div class="mt-4 grid gap-3 sm:grid-cols-2">
-						{#each quickCaptureAttachments as attachment}
-							<div class="overflow-hidden rounded-2xl border border-white/8 bg-black/25">
-								{#if isImageAttachment(attachment)}
-									<img class="h-36 w-full object-cover" src={attachment.url} alt={attachment.title} />
-								{:else}
-									<div class="flex h-36 items-center justify-center bg-white/[0.03] px-4 text-center text-sm text-zinc-300">
-										{vaultAttachmentKindLabel(attachment.kind)}
-									</div>
-								{/if}
-								<div class="flex items-center justify-between gap-3 px-4 py-3">
-									<div class="min-w-0">
-										<p class="truncate text-sm font-medium text-white">{attachment.title}</p>
-										<p class="mt-1 text-xs text-zinc-400">
-											{vaultAttachmentKindLabel(attachment.kind)}
-											{#if formatBytes(attachment.sizeBytes)}
-												- {formatBytes(attachment.sizeBytes)}
-											{/if}
-										</p>
-									</div>
-									<button
-										class="rounded-full border border-red-500/20 px-3 py-1 text-xs text-red-300"
-										type="button"
-										onclick={() => removeQuickAttachment(attachment.id)}
-									>
-										Retirer
-									</button>
-								</div>
-							</div>
-						{/each}
-					</div>
-				{:else}
-					<div class="mt-4 rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center">
-						<p class="text-sm text-zinc-400">
-							Ajoute une photo du telephone, ecris son commentaire, puis sauvegarde ta note complete.
-						</p>
-					</div>
-				{/if}
-			</div>
-		</div>
-	</Card>
-
-	<Card
-		tone="active"
-		class="overflow-hidden border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(51,153,255,0.18),transparent_38%),radial-gradient(circle_at_top_right,rgba(255,79,216,0.14),transparent_36%),#101114]"
+		class="overflow-hidden border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(0,212,255,0.18),transparent_38%),radial-gradient(circle_at_top_right,rgba(123,47,255,0.12),transparent_34%),#101114]"
 	>
 		<div class="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
 			<div class="max-w-3xl">
-				<p class="text-xs uppercase tracking-[0.22em] text-[#8fcaff]">Notes</p>
-				<h1 class="mt-3 text-3xl font-semibold text-white">Notes, idees, photos et memos</h1>
+				<p class="text-xs tracking-[0.22em] text-[#8fcaff] uppercase">Bibliotheque</p>
+				<h1 class="mt-3 text-3xl font-semibold text-white">
+					Toutes les notes, sans dossiers rigides
+				</h1>
 				<p class="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">
-					Ton espace personnel pour garder ensemble les notes rapides, les photos commentees et les memos utiles, sans les disperser.
+					Recherche avancee, priorites chromees, etat de vie, decay visible et liens implicites
+					entre les notes.
 				</p>
 			</div>
 
-			<div class="max-w-md rounded-3xl border border-white/8 bg-black/20 px-4 py-4">
-				<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Mode actuel</p>
-				<p class="mt-2 text-sm text-zinc-300">
-					Ici, on se concentre sur les notes vivantes: priorite, etat de vie, decay et classement immediat.
-				</p>
+			<div class="grid gap-3 sm:grid-cols-3">
+				<div class="rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
+					<p class="text-xs tracking-[0.16em] text-zinc-500 uppercase">Notes</p>
+					<p class="mt-2 text-2xl font-semibold text-white">{vaultItems.length}</p>
+				</div>
+				<div class="rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
+					<p class="text-xs tracking-[0.16em] text-zinc-500 uppercase">Media</p>
+					<p class="mt-2 text-2xl font-semibold text-white">{mediaNoteCount}</p>
+				</div>
+				<div class="rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
+					<p class="text-xs tracking-[0.16em] text-zinc-500 uppercase">Fantomes</p>
+					<p class="mt-2 text-2xl font-semibold text-white">{ghostNoteCount}</p>
+				</div>
 			</div>
 		</div>
 	</Card>
 
-	<div class="grid gap-4 md:grid-cols-4">
-		<Card class="bg-[linear-gradient(135deg,rgba(255,79,216,0.08),transparent_65%),#111]">
-			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Notes</p>
-			<p class="mt-2 text-3xl font-semibold text-white">{vaultItems.length}</p>
-		</Card>
-		<Card class="bg-[linear-gradient(135deg,rgba(51,153,255,0.08),transparent_65%),#111]">
-			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Captures rapides</p>
-			<p class="mt-2 text-3xl font-semibold text-white">{quickCaptureCount}</p>
-		</Card>
-		<Card class="bg-[linear-gradient(135deg,rgba(34,197,94,0.08),transparent_65%),#111]">
-			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Notes avec media</p>
-			<p class="mt-2 text-3xl font-semibold text-white">{mediaNoteCount}</p>
-		</Card>
-		<Card class="bg-[linear-gradient(135deg,rgba(255,45,85,0.08),transparent_65%),#111]">
-			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Fantomes</p>
-			<p class="mt-2 text-3xl font-semibold text-white">{ghostNoteCount}</p>
-		</Card>
-	</div>
-
-	<div class="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+	<div class="grid gap-4 xl:grid-cols-[0.92fr_1.08fr]">
 		<Card class="xl:sticky xl:top-24">
 			<div class="flex items-center justify-between gap-3">
 				<div>
-					<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Editeur</p>
+					<p class="text-xs tracking-[0.2em] text-zinc-500 uppercase">Editeur</p>
 					<h2 class="mt-2 text-xl font-semibold text-white">
 						{editingId ? 'Modifier une note' : 'Ajouter une note'}
 					</h2>
@@ -666,28 +384,13 @@
 
 			<div class="mt-4 space-y-4">
 				<input
-					class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none transition focus:border-[#3399FF]/40"
+					class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white transition outline-none focus:border-[#00D4FF]/40"
 					placeholder="Titre"
 					bind:value={title}
 				/>
 
-				<div class="grid gap-3 md:grid-cols-2">
-					<select
-						class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none"
-						bind:value={projectId}
-					>
-						<option value="">Aucun projet</option>
-						{#each $projects.filter((project) => !project.deleted_at) as project}
-							<option value={project.id}>{project.title}</option>
-						{/each}
-					</select>
-					<div class="flex items-center rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-zinc-300">
-						Note personnelle ou memo photo
-					</div>
-				</div>
-
 				<div>
-					<p class="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">Couleur</p>
+					<p class="mb-2 text-xs tracking-[0.2em] text-zinc-500 uppercase">Couleur</p>
 					<div class="flex flex-wrap gap-2">
 						{#each NOTE_COLOR_OPTIONS as option}
 							<button
@@ -703,7 +406,7 @@
 				</div>
 
 				<div>
-					<p class="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">Priorite chromee</p>
+					<p class="mb-2 text-xs tracking-[0.2em] text-zinc-500 uppercase">Priorite chromee</p>
 					<div class="flex flex-wrap gap-2">
 						{#each NOTE_PRIORITY_OPTIONS as option}
 							<button
@@ -712,14 +415,15 @@
 								type="button"
 								onclick={() => (priority = option.value)}
 							>
-								{option.icon} {option.shortLabel}
+								{option.icon}
+								{option.shortLabel}
 							</button>
 						{/each}
 					</div>
 				</div>
 
 				<div>
-					<p class="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">Etat de vie</p>
+					<p class="mb-2 text-xs tracking-[0.2em] text-zinc-500 uppercase">Etat de vie</p>
 					<div class="flex flex-wrap gap-2">
 						{#each NOTE_LIFE_STATE_OPTIONS as option}
 							<button
@@ -727,24 +431,27 @@
 								type="button"
 								onclick={() => (lifeState = option.value)}
 							>
-								{option.icon} {option.label}
+								{option.icon}
+								{option.label}
 							</button>
 						{/each}
 					</div>
 				</div>
 
 				<input
-					class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none transition focus:border-[#3399FF]/40"
+					class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white transition outline-none focus:border-[#00D4FF]/40"
 					placeholder="Tags libres, separes par virgules ou #"
 					bind:value={tagInput}
 				/>
 
-				<div class="rounded-3xl border border-white/8 bg-[linear-gradient(135deg,rgba(255,79,216,0.06),transparent_55%),rgba(255,255,255,0.01)] p-4">
+				<div
+					class="rounded-3xl border border-white/8 bg-[linear-gradient(135deg,rgba(123,47,255,0.08),transparent_55%),rgba(255,255,255,0.01)] p-4"
+				>
 					<div class="flex flex-col gap-3">
 						<div>
-							<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Medias et liens</p>
+							<p class="text-xs tracking-[0.2em] text-zinc-500 uppercase">Medias et liens</p>
 							<p class="mt-2 text-sm text-zinc-400">
-								Ajoute une video, une image, un audio, ou un lien utile directement dans la note.
+								Ajoute une image, une video, un audio ou un lien directement dans la note.
 							</p>
 						</div>
 
@@ -759,7 +466,7 @@
 								<option value="audio">Audio</option>
 							</select>
 							<input
-								class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none transition focus:border-[#3399FF]/40"
+								class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white transition outline-none focus:border-[#00D4FF]/40"
 								placeholder="URL d une ressource, video ou page importante"
 								bind:value={attachmentUrl}
 							/>
@@ -774,12 +481,12 @@
 
 						<div class="grid gap-3 md:grid-cols-[1fr_auto]">
 							<input
-								class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none transition focus:border-[#3399FF]/40"
+								class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white transition outline-none focus:border-[#00D4FF]/40"
 								placeholder="Titre optionnel pour la ressource"
 								bind:value={attachmentTitle}
 							/>
 							<button
-								class="rounded-2xl bg-[#FF4FD8] px-4 py-3 text-sm font-medium text-white shadow-[0_0_18px_rgba(255,79,216,0.14)]"
+								class="rounded-2xl bg-[#7B2FFF] px-4 py-3 text-sm font-medium text-white shadow-[0_0_18px_rgba(123,47,255,0.18)]"
 								type="button"
 								onclick={openMediaPicker}
 							>
@@ -797,7 +504,9 @@
 						/>
 
 						{#if mediaMessage}
-							<p class={`text-sm ${mediaMessageTone === 'error' ? 'text-rose-300' : 'text-[#8fcaff]'}`}>
+							<p
+								class={`text-sm ${mediaMessageTone === 'error' ? 'text-rose-300' : 'text-[#8fcaff]'}`}
+							>
 								{mediaMessage}
 							</p>
 						{/if}
@@ -805,7 +514,9 @@
 						{#if attachments.length}
 							<div class="grid gap-2">
 								{#each attachments as attachment}
-									<div class="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
+									<div
+										class="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-black/20 px-4 py-3"
+									>
 										<div class="min-w-0">
 											<p class="truncate text-sm font-medium text-white">{attachment.title}</p>
 											<p class="mt-1 text-xs text-zinc-400">
@@ -830,19 +541,21 @@
 				</div>
 
 				<textarea
-					class="min-h-[220px] w-full rounded-3xl border border-white/10 bg-black/20 px-4 py-4 text-sm leading-6 text-white outline-none transition focus:border-[#3399FF]/40"
+					class="min-h-[240px] w-full rounded-3xl border border-white/10 bg-black/20 px-4 py-4 text-sm leading-6 text-white transition outline-none focus:border-[#00D4FF]/40"
 					placeholder="Contenu de la note, commentaire de photo, memo ou idee detaillee"
 					bind:value={content}
 				></textarea>
 
-				<label class="flex items-center gap-3 rounded-2xl border border-white/8 bg-black/20 px-4 py-3 text-sm text-zinc-300">
-					<input class="h-4 w-4 accent-[#FF4FD8]" type="checkbox" bind:checked={pinned} />
-					Pingler pour garder cet element en haut
+				<label
+					class="flex items-center gap-3 rounded-2xl border border-white/8 bg-black/20 px-4 py-3 text-sm text-zinc-300"
+				>
+					<input class="h-4 w-4 accent-[#7B2FFF]" type="checkbox" bind:checked={pinned} />
+					Pingler pour garder cette note en haut
 				</label>
 
 				<div class="flex flex-wrap gap-2">
 					<button
-						class="rounded-2xl bg-[#3399FF] px-4 py-3 text-sm font-semibold text-white shadow-[0_0_18px_rgba(51,153,255,0.15)]"
+						class="rounded-2xl bg-[#00D4FF] px-4 py-3 text-sm font-semibold text-[#0A0E1A] shadow-[0_0_18px_rgba(0,212,255,0.2)]"
 						type="button"
 						onclick={submit}
 					>
@@ -863,8 +576,8 @@
 			<Card class="bg-[#111]">
 				<div class="flex flex-col gap-3">
 					<input
-						class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none transition focus:border-[#3399FF]/40"
-						placeholder="Rechercher dans les notes"
+						class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white transition outline-none focus:border-[#00D4FF]/40"
+						placeholder="Recherche globale: budget, tag:client-x, priority:p1, state:seed, media:yes"
 						bind:value={search}
 					/>
 
@@ -888,15 +601,17 @@
 						{/each}
 					</div>
 
-					<label class="flex items-center gap-3 text-sm text-zinc-300">
-						<input class="h-4 w-4 accent-[#FF4FD8]" type="checkbox" bind:checked={pinnedOnly} />
-						Afficher seulement les elements epingles
-					</label>
+					<div class="grid gap-3 md:grid-cols-2">
+						<label class="flex items-center gap-3 text-sm text-zinc-300">
+							<input class="h-4 w-4 accent-[#7B2FFF]" type="checkbox" bind:checked={pinnedOnly} />
+							Afficher seulement les notes epinglees
+						</label>
 
-					<label class="flex items-center gap-3 text-sm text-zinc-300">
-						<input class="h-4 w-4 accent-[#00D4FF]" type="checkbox" bind:checked={showArchived} />
-						Afficher aussi les notes archivees P4
-					</label>
+						<label class="flex items-center gap-3 text-sm text-zinc-300">
+							<input class="h-4 w-4 accent-[#00D4FF]" type="checkbox" bind:checked={showArchived} />
+							Afficher aussi les notes archivees P4
+						</label>
+					</div>
 				</div>
 			</Card>
 
@@ -907,54 +622,81 @@
 							<div class="flex items-start justify-between gap-3">
 								<div class="flex items-center gap-2">
 									<span class={`h-2.5 w-2.5 rounded-full ${item.colors.dot}`}></span>
-									<span class={`rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] ${item.colors.chip}`}>Note</span>
 									<span
-										class={`rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] ${item.meta.priority === 'p0' ? 'animate-pulse' : ''}`}
+										class={`rounded-full border px-2.5 py-1 text-[11px] tracking-[0.16em] uppercase ${item.colors.chip}`}
+										>Note</span
+									>
+									<span
+										class={`rounded-full border px-2.5 py-1 text-[11px] tracking-[0.16em] uppercase ${item.meta.priority === 'p0' ? 'animate-pulse' : ''}`}
 										style={`border-color: ${getPriorityMeta(item.meta.priority).accent}44; background: ${getPriorityMeta(item.meta.priority).accent}18; color: ${getPriorityMeta(item.meta.priority).accent};`}
 									>
 										{getPriorityMeta(item.meta.priority).shortLabel}
 									</span>
-									<span class="rounded-full border border-white/10 px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-zinc-300">
-										{getLifeStateMeta(item.meta.lifeState).icon} {getLifeStateMeta(item.meta.lifeState).label}
+									<span
+										class="rounded-full border border-white/10 px-2 py-1 text-[11px] tracking-[0.16em] text-zinc-300 uppercase"
+									>
+										{getLifeStateMeta(item.meta.lifeState).icon}
+										{getLifeStateMeta(item.meta.lifeState).label}
 									</span>
 									{#if item.meta.pinned}
-										<span class="rounded-full border border-amber-400/20 bg-amber-400/10 px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-amber-200">
+										<span
+											class="rounded-full border border-amber-400/20 bg-amber-400/10 px-2 py-1 text-[11px] tracking-[0.16em] text-amber-200 uppercase"
+										>
 											Pin
 										</span>
 									{/if}
-									<span class="rounded-full border border-white/10 px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-zinc-400">
-										{getDecayMeta(item.note, item.meta).icon} {getDecayMeta(item.note, item.meta).label}
+									<span
+										class="rounded-full border border-white/10 px-2 py-1 text-[11px] tracking-[0.16em] text-zinc-400 uppercase"
+									>
+										{getDecayMeta(item.note, item.meta).label}
 									</span>
 								</div>
 
 								<div class="flex flex-wrap justify-end gap-2">
-									<button class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300" type="button" onclick={() => copyContent(item.note.id, item.note.content)}>
+									<button
+										class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300"
+										type="button"
+										onclick={() => copyContent(item.note.id, item.note.content)}
+									>
 										{copyMessage === item.note.id ? 'Copie' : 'Copier'}
 									</button>
-									<button class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300" type="button" onclick={() => startEdit(item.note.id)}>
+									<button
+										class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300"
+										type="button"
+										onclick={() => startEdit(item.note.id)}
+									>
 										Editer
 									</button>
-									<button class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300" type="button" onclick={() => togglePinned(item.note.id)}>
+									<button
+										class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300"
+										type="button"
+										onclick={() => togglePinned(item.note.id)}
+									>
 										{item.meta.pinned ? 'Unpin' : 'Pin'}
 									</button>
-									<button class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300" type="button" onclick={() => duplicate(item.note.id)}>
+									<button
+										class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300"
+										type="button"
+										onclick={() => duplicate(item.note.id)}
+									>
 										Dupliquer
 									</button>
-									<button class="rounded-full border border-red-500/20 px-2.5 py-1 text-xs text-red-300" type="button" onclick={() => flowpilot.deleteNote(item.note.id)}>
+									<button
+										class="rounded-full border border-red-500/20 px-2.5 py-1 text-xs text-red-300"
+										type="button"
+										onclick={() => flowpilot.deleteNote(item.note.id)}
+									>
 										Supprimer
 									</button>
 								</div>
 							</div>
 
 							<h2 class="mt-4 text-xl font-semibold text-white">{item.note.title}</h2>
-							{#if item.project}
-								<p class="mt-2 text-xs uppercase tracking-[0.16em] text-zinc-400">
-									Projet lie: {item.project.title}
-								</p>
-							{/if}
 
 							{#if item.document.plainText}
-								<pre class="mt-4 max-h-56 overflow-auto whitespace-pre-wrap rounded-2xl border border-white/6 bg-black/25 px-4 py-3 font-sans text-sm leading-6 text-zinc-200">{item.document.plainText}</pre>
+								<pre
+									class="mt-4 max-h-56 overflow-auto rounded-2xl border border-white/6 bg-black/25 px-4 py-3 font-sans text-sm leading-6 whitespace-pre-wrap text-zinc-200">{item
+										.document.plainText}</pre>
 							{:else if !item.document.attachments.length}
 								<p class="mt-4 text-sm text-zinc-500">Contenu vide.</p>
 							{/if}
@@ -963,7 +705,9 @@
 								<div class="mt-4 space-y-3">
 									{#each item.document.attachments as attachment}
 										<div class="overflow-hidden rounded-2xl border border-white/8 bg-black/25">
-											<div class="flex items-center justify-between gap-3 border-b border-white/6 px-4 py-3">
+											<div
+												class="flex items-center justify-between gap-3 border-b border-white/6 px-4 py-3"
+											>
 												<div>
 													<p class="text-sm font-medium text-white">{attachment.title}</p>
 													<p class="mt-1 text-xs text-zinc-400">
@@ -999,11 +743,12 @@
 												></video>
 											{:else if isAudioAttachment(attachment)}
 												<div class="px-4 py-4">
-													<audio class="w-full" src={attachment.url} controls preload="metadata"></audio>
+													<audio class="w-full" src={attachment.url} controls preload="metadata"
+													></audio>
 												</div>
 											{:else}
 												<div class="px-4 py-4">
-													<p class="break-all text-sm text-zinc-300">{attachment.url}</p>
+													<p class="text-sm break-all text-zinc-300">{attachment.url}</p>
 												</div>
 											{/if}
 										</div>
@@ -1014,15 +759,37 @@
 							{#if item.meta.plainTags.length}
 								<div class="mt-4 flex flex-wrap gap-2">
 									{#each item.meta.plainTags as tag}
-										<span class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300">
+										<span
+											class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300"
+										>
 											#{tag}
 										</span>
 									{/each}
 								</div>
 							{/if}
 
+							{#if (relatedNoteMap.get(item.note.id)?.length ?? 0) > 0}
+								<div class="mt-4 rounded-2xl border border-white/8 bg-black/20 p-4">
+									<p class="text-xs tracking-[0.16em] text-zinc-500 uppercase">Liens implicites</p>
+									<div class="mt-3 flex flex-wrap gap-2">
+										{#each relatedNoteMap.get(item.note.id) ?? [] as related}
+											<button
+												class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300"
+												type="button"
+												onclick={() => startEdit(related.note.id)}
+											>
+												{related.note.title}
+											</button>
+										{/each}
+									</div>
+								</div>
+							{/if}
+
 							<p class="mt-4 text-xs text-zinc-500">
-								Mis a jour le {new Date(item.note.updated_at).toLocaleString('fr-FR')} · {getDecayMeta(item.note, item.meta).daysOld} jour(s)
+								Mis a jour le {new Date(item.note.updated_at).toLocaleString('fr-FR')} - {getDecayMeta(
+									item.note,
+									item.meta
+								).daysOld} jour(s)
 							</p>
 						</Card>
 					{/each}

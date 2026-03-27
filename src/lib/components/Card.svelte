@@ -15,7 +15,7 @@
 
 	const toneClasses = {
 		default: 'border-white/6 bg-[#111] shadow-[0_0_0_1px_rgba(255,255,255,0.03)]',
-		active: 'border-[#3399FF]/35 bg-[#101826] shadow-[0_0_18px_rgba(51,153,255,0.12)]',
+		active: 'border-[#00D4FF]/30 bg-[#0F1629] shadow-[0_0_18px_rgba(0,212,255,0.12)]',
 		warning: 'border-red-500/25 bg-[#161212] shadow-[0_0_0_1px_rgba(239,68,68,0.08)]'
 	};
 </script>

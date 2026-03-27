@@ -1,8 +1,8 @@
-# FlowPilot
+# Nexus Notes
 
-PWA personnelle de productivite en mode local-first: inbox, clarification, taches, focus, projets, agenda, habitudes, revue et analytics, avec sync Supabase et stockage offline Dexie.
+PWA de prise de notes locale-first pour capturer une idee, une photo, un lien ou un memo en quelques secondes, puis les retrouver avec priorite, decay et sync multi-device.
 
-L'app demarre meme sans `.env` en mode local-only. Avec Supabase configure, l'auth et la sync multi-device sont actives.
+L'app demarre meme sans `.env` en mode local-only. Avec Supabase configure, l'auth Google/email et la sync entre appareils sont actives.
 
 ## Demarrage local
 
@@ -18,29 +18,27 @@ Puis ouvrir l'URL locale affichee par Vite.
 1. Creer un projet Supabase.
 2. Ouvrir le SQL Editor.
 3. Coller le contenu de [`supabase/schema.sql`](/C:/Users/user/Desktop/FIRE/supabase/schema.sql) puis executer.
-4. Activer le provider Google dans `Authentication > Providers` si vous voulez la connexion Google.
-5. Copier [`.env.example`](/C:/Users/user/Desktop/FIRE/.env.example) vers `.env` et renseigner:
+4. Copier [`.env.example`](/C:/Users/user/Desktop/FIRE/.env.example) vers `.env` et renseigner:
 
 ```bash
 PUBLIC_SUPABASE_URL=...
 PUBLIC_SUPABASE_ANON_KEY=...
 ```
 
-6. Redemarrer `npm run dev`.
+5. Dans `Authentication > URL Configuration`, ajouter:
+   - `http://localhost:5173`
+   - l'URL Vercel de production
+6. Si tu veux la connexion Google, activer le provider Google dans Supabase et renseigner le client OAuth Google.
 
-Notes:
-- L'app cree le profil utilisateur automatiquement au premier login.
-- Realtime est utilise pour accelerer la propagation. Un polling de securite toutes les 30s couvre aussi les retours reseau.
-
-## Build et deploiement Vercel
+## Build et deploiement
 
 ```bash
 npm run build
 ```
 
-Le projet utilise `@sveltejs/adapter-vercel`, donc vous pouvez connecter le repo a Vercel directement.
+Le projet est client-only et utilise `@sveltejs/adapter-static`, ce qui simplifie le build sur Windows et le deploiement Vercel.
 
-Pensez a recopier les variables d'environnement `PUBLIC_SUPABASE_URL` et `PUBLIC_SUPABASE_ANON_KEY` dans le projet Vercel.
+Pense a recopier les variables d'environnement `PUBLIC_SUPABASE_URL` et `PUBLIC_SUPABASE_ANON_KEY` dans le projet Vercel.
 
 ## Installation Android
 
@@ -50,17 +48,19 @@ Pensez a recopier les variables d'environnement `PUBLIC_SUPABASE_URL` et `PUBLIC
 
 La PWA conserve les donnees hors ligne via IndexedDB et rejoue la file de sync quand le reseau revient.
 
-## Fonctionnel aujourd'hui
+## Fonctionnel aujourd hui
 
-- Auth email/mot de passe + Google via Supabase
-- Layout responsive: sidebar desktop, bottom bar mobile, FAB inbox
-- Inbox + clarification sequentielle
-- CRUD taches + sous-taches + swipe actions
-- Dashboard "Maintenant", "Aujourd'hui", focus, inbox, retards, habitudes
-- Focus Pomodoro relie a une tache, historique inclus
-- Projets, agenda time-blocking drag/drop, habitudes, revue, analytics, parametres
-- Local-first Dexie + queue persistante + merge de conflit base sur `version`
-- Service worker + manifest PWA
+- Prise de notes locale-first avec Dexie + queue de sync persistante
+- Connexion Supabase email/mot de passe + Google
+- Capture rapide texte/photo/media avec commentaire
+- Slash commands `/todo`, `/meeting`, `/idea`, `/later`
+- Priorite chromee P0 -> P4
+- Etats de vie `Graine`, `Active`, `Solide`, `Obsolete`
+- Decay system `Fraiche`, `Tiede`, `Dormante`, `Fantome`
+- Smart collections et constellation de tags
+- Galerie media
+- Dashboard de note velocity
+- PWA installable sur desktop/mobile
 
 ## Structure du projet
 
@@ -68,16 +68,20 @@ La PWA conserve les donnees hors ligne via IndexedDB et rejoue la file de sync q
   Moteur principal: auth, donnees locales, queue de sync, conflits, actions metier.
 - [`src/lib/db.ts`](/C:/Users/user/Desktop/FIRE/src/lib/db.ts)
   Schema IndexedDB Dexie, aligne sur le modele distant et les tables locales annexes.
-- [`src/lib/parser.ts`](/C:/Users/user/Desktop/FIRE/src/lib/parser.ts)
-  Parsing inbox basique: date, urgence, tags, projet.
-- [`src/routes/+layout.svelte`](/C:/Users/user/Desktop/FIRE/src/routes/+layout.svelte)
-  Coque applicative, navigation mobile/desktop, notifications, quick capture.
+- [`src/lib/note-vault.ts`](/C:/Users/user/Desktop/FIRE/src/lib/note-vault.ts)
+  Meta-modele des notes: couleur, priorite, etat de vie, decay.
+- [`src/lib/nexus-notes.ts`](/C:/Users/user/Desktop/FIRE/src/lib/nexus-notes.ts)
+  Intelligence locale des notes: slash commands, smart search, smart collections, velocity.
+- [`src/lib/vault-document.ts`](/C:/Users/user/Desktop/FIRE/src/lib/vault-document.ts)
+  Format de contenu des notes et pieces jointes.
 - [`src/routes/+page.svelte`](/C:/Users/user/Desktop/FIRE/src/routes/+page.svelte)
-  Dashboard.
-- [`src/routes/tasks/+page.svelte`](/C:/Users/user/Desktop/FIRE/src/routes/tasks/+page.svelte)
-  Liste taches, edition, sous-taches.
-- [`src/routes/focus/+page.svelte`](/C:/Users/user/Desktop/FIRE/src/routes/focus/+page.svelte)
-  Timer focus.
+  Dashboard Nexus Notes.
+- [`src/routes/vault/+page.svelte`](/C:/Users/user/Desktop/FIRE/src/routes/vault/+page.svelte)
+  Bibliotheque complete et editeur principal.
+- [`src/routes/collections/+page.svelte`](/C:/Users/user/Desktop/FIRE/src/routes/collections/+page.svelte)
+  Constellation, smart collections et decay.
+- [`src/routes/media/+page.svelte`](/C:/Users/user/Desktop/FIRE/src/routes/media/+page.svelte)
+  Galerie des notes avec medias.
 - [`src/service-worker.ts`](/C:/Users/user/Desktop/FIRE/src/service-worker.ts)
   Cache shell PWA et fallback offline.
 - [`supabase/schema.sql`](/C:/Users/user/Desktop/FIRE/supabase/schema.sql)

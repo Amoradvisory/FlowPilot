@@ -22,7 +22,9 @@ const IMAGE_URL_PATTERN = /\.(png|jpe?g|gif|webp|svg|avif)(\?.*)?$/i;
 const VIDEO_URL_PATTERN = /\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i;
 const AUDIO_URL_PATTERN = /\.(mp3|wav|ogg|m4a|aac|flac)(\?.*)?$/i;
 
-const normalizeAttachment = (attachment: Partial<VaultAttachment> | null | undefined): VaultAttachment | null => {
+const normalizeAttachment = (
+	attachment: Partial<VaultAttachment> | null | undefined
+): VaultAttachment | null => {
 	if (!attachment?.url?.trim()) return null;
 
 	const title = attachment.title?.trim() || 'Ressource';
@@ -54,7 +56,9 @@ export const parseVaultContent = (content: string | null | undefined): VaultDocu
 	}
 
 	try {
-		const parsed = JSON.parse(content.slice(VAULT_DOCUMENT_PREFIX.length)) as Partial<VaultDocument>;
+		const parsed = JSON.parse(
+			content.slice(VAULT_DOCUMENT_PREFIX.length)
+		) as Partial<VaultDocument>;
 		return {
 			plainText: parsed.plainText?.trim() ?? '',
 			attachments: sanitizeAttachments(parsed.attachments ?? [])
@@ -80,9 +84,10 @@ export const buildVaultContent = (plainText: string, attachments: VaultAttachmen
 export const summarizeVaultContent = (content: string | null | undefined, maxLength = 140) => {
 	const document = parseVaultContent(content);
 	if (document.plainText) {
-		return document.plainText.length > maxLength
-			? `${document.plainText.slice(0, maxLength - 1).trimEnd()}…`
-			: document.plainText;
+		if (document.plainText.length > maxLength) {
+			return `${document.plainText.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+		}
+		return document.plainText;
 	}
 	if (document.attachments.length) {
 		return `${document.attachments.length} ressource(s) jointe(s)`;
