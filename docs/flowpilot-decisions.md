@@ -65,6 +65,20 @@ The app did not become truly usable across devices until the release loop was cl
 
 That sequence is now part of the reusable skill instead of living only in chat history.
 
+### Notes, prompts, and snippets without a schema migration
+
+The broader note-taking layer was added as a `Vault` built on top of the existing `notes` table instead of introducing new remote tables right away.
+
+Metadata such as item kind, color, pinning, and snippet language is encoded in `notes.tags` with reserved prefixes.
+
+That choice kept three things stable:
+
+- no Supabase SQL migration for this pass
+- no Dexie mirror change for sync
+- no regression risk for offline replay and conflict handling
+
+If the Vault later needs attachments, sharing, or richer search, it can graduate to dedicated tables. For now, the metadata-on-tags approach is the fastest safe extension.
+
 ## What Unlocks True Cross-Device Sync
 
 To get real phone-to-PC sync:

@@ -15,6 +15,8 @@ Thumbs.db
 # Local diagnostics
 .playwright-cli/
 .dev-*.log
+/tmp
+/output
 
 # Env
 .env

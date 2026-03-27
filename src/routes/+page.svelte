@@ -1,7 +1,14 @@
 <script lang="ts">
 	import Card from '$lib/components/Card.svelte';
-	import { currentTask, dashboardPrompts, flowpilot, habitProgress, pendingInboxItems, profile, projectProgress, todayFocusMinutes, todayTasks, overdueTasks, visibleTasks } from '$lib/flowpilot';
+	import { currentTask, dashboardPrompts, flowpilot, habitProgress, notes, pendingInboxItems, profile, projectProgress, todayFocusMinutes, todayTasks, overdueTasks, visibleTasks } from '$lib/flowpilot';
+	import type { Note } from '$lib/types';
 	import { formatMinutes } from '$lib/utils';
+	import { getVaultMeta, type VaultMeta } from '$lib/note-vault';
+
+	type DashboardVaultItem = {
+		note: Note;
+		meta: VaultMeta;
+	};
 
 	const today = new Date().toISOString().slice(0, 10);
 	const plannedTodayTotal = $derived($visibleTasks.filter((task) => task.scheduled_date === today).length);
@@ -10,6 +17,19 @@
 	);
 	const inboxBacklog = $derived(
 		$pendingInboxItems.filter((item) => Date.now() - new Date(item.created_at).getTime() > 24 * 60 * 60 * 1000)
+	);
+	const vaultItems = $derived(
+		$notes
+			.filter((note) => !note.deleted_at)
+			.map((note): DashboardVaultItem => ({ note, meta: getVaultMeta(note) }))
+			.sort((left, right) => {
+				if (left.meta.pinned !== right.meta.pinned) return Number(right.meta.pinned) - Number(left.meta.pinned);
+				return new Date(right.note.updated_at).getTime() - new Date(left.note.updated_at).getTime();
+			})
+	);
+	const pinnedVault = $derived(vaultItems.filter((item: DashboardVaultItem) => item.meta.pinned));
+	const promptVault = $derived(
+		vaultItems.filter((item: DashboardVaultItem) => item.meta.kind === 'prompt')
 	);
 </script>
 
@@ -173,6 +193,30 @@
 							{item.raw_text}
 						</div>
 					{/each}
+				</div>
+			</Card>
+
+			<Card class="bg-[radial-gradient(circle_at_top_right,rgba(255,79,216,0.12),transparent_36%),radial-gradient(circle_at_top_left,rgba(51,153,255,0.12),transparent_34%),#111]">
+				<div class="flex items-center justify-between gap-4">
+					<div>
+						<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Vault</p>
+						<h2 class="mt-2 text-xl font-semibold text-white">{pinnedVault.length} epingle(s)</h2>
+						<p class="mt-2 text-sm text-zinc-400">{promptVault.length} prompt(s) et {vaultItems.length} note(s) utiles a reutiliser.</p>
+					</div>
+					<a class="rounded-2xl border border-white/10 px-3 py-2 text-sm text-white" href="/vault">Ouvrir</a>
+				</div>
+
+				<div class="mt-4 space-y-2">
+					{#if pinnedVault.length}
+						{#each pinnedVault.slice(0, 3) as item}
+							<div class="rounded-2xl border border-white/6 bg-black/20 px-4 py-3">
+								<p class="font-medium text-white">{item.note.title}</p>
+								<p class="mt-1 text-sm text-zinc-400">{item.meta.kind}</p>
+							</div>
+						{/each}
+					{:else}
+						<p class="text-sm text-zinc-500">Ajoute une note importante ou un prompt pour les retrouver ici.</p>
+					{/if}
 				</div>
 			</Card>
 

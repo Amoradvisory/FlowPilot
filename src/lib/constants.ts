@@ -62,6 +62,7 @@ export const NAV_ITEMS = [
 export const SECONDARY_ITEMS = [
 	{ href: '/inbox', label: 'Inbox' },
 	{ href: '/clarify', label: 'Clarifier' },
+	{ href: '/vault', label: 'Vault' },
 	{ href: '/projects', label: 'Projets' },
 	{ href: '/habits', label: 'Habitudes' },
 	{ href: '/review', label: 'Revue' },
