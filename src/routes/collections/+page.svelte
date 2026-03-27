@@ -1,6 +1,13 @@
 <script lang="ts">
 	import Card from '$lib/components/Card.svelte';
-	import { NOTE_COLOR_OPTIONS, getVaultMeta, noteColorClasses, type VaultMeta } from '$lib/note-vault';
+	import {
+		NOTE_COLOR_OPTIONS,
+		getDecayMeta,
+		getPriorityMeta,
+		getVaultMeta,
+		noteColorClasses,
+		type VaultMeta
+	} from '$lib/note-vault';
 	import { notes, projects } from '$lib/flowpilot';
 	import { parseVaultContent, summarizeVaultContent, type VaultDocument } from '$lib/vault-document';
 	import type { Note, Project } from '$lib/types';
@@ -55,6 +62,33 @@
 			items: noteItems.filter((item: CollectionNoteItem) => item.meta.color === option.value)
 		})).filter((group) => group.items.length > 0)
 	);
+
+	const groupedByDecay = $derived([
+		{
+			key: 'fresh',
+			label: 'Fraiches',
+			description: 'Notes modifiees recemment.',
+			items: noteItems.filter((item: CollectionNoteItem) => getDecayMeta(item.note, item.meta).band === 'fresh')
+		},
+		{
+			key: 'warm',
+			label: 'Tiedes',
+			description: 'Encore utiles, mais deja un peu plus loin.',
+			items: noteItems.filter((item: CollectionNoteItem) => getDecayMeta(item.note, item.meta).band === 'warm')
+		},
+		{
+			key: 'dormant',
+			label: 'Dormantes',
+			description: 'A revisiter bientot.',
+			items: noteItems.filter((item: CollectionNoteItem) => getDecayMeta(item.note, item.meta).band === 'dormant')
+		},
+		{
+			key: 'ghost',
+			label: 'Fantomes',
+			description: 'Notes oubliees depuis longtemps.',
+			items: noteItems.filter((item: CollectionNoteItem) => getDecayMeta(item.note, item.meta).band === 'ghost')
+		}
+	]);
 </script>
 
 <div class="space-y-4">
@@ -119,4 +153,46 @@
 			</div>
 		</Card>
 	</div>
+
+	<Card>
+		<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Decay system</p>
+		<h2 class="mt-2 text-xl font-semibold text-white">Vie des notes</h2>
+
+		<div class="mt-4 grid gap-4 xl:grid-cols-2">
+			{#each groupedByDecay as group}
+				<div class="rounded-3xl border border-white/8 bg-black/20 p-4">
+					<div class="flex items-center justify-between gap-3">
+						<div>
+							<p class="text-sm font-medium text-white">{group.label}</p>
+							<p class="mt-1 text-sm text-zinc-400">{group.description}</p>
+						</div>
+						<p class="text-xs text-zinc-500">{group.items.length} note(s)</p>
+					</div>
+
+					<div class="mt-4 space-y-3">
+						{#if group.items.length}
+							{#each group.items.slice(0, 3) as item}
+								<a class={`block rounded-2xl border px-4 py-3 ${item.colors.card}`} href="/vault">
+									<div class="flex items-start justify-between gap-3">
+										<div class="min-w-0">
+											<p class="font-medium text-white">{item.note.title}</p>
+											<p class="mt-1 text-sm text-zinc-400">{summarizeVaultContent(item.note.content, 90)}</p>
+										</div>
+										<div class="shrink-0 text-right">
+											<p class="text-xs uppercase tracking-[0.16em]" style={`color: ${getPriorityMeta(item.meta.priority).accent};`}>
+												{getPriorityMeta(item.meta.priority).shortLabel}
+											</p>
+											<p class="mt-1 text-xs text-zinc-500">{getDecayMeta(item.note, item.meta).icon}</p>
+										</div>
+									</div>
+								</a>
+							{/each}
+						{:else}
+							<p class="text-sm text-zinc-500">Aucune note dans ce groupe pour l’instant.</p>
+						{/if}
+					</div>
+				</div>
+			{/each}
+		</div>
+	</Card>
 </div>

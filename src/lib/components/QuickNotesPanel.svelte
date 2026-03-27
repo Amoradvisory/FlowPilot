@@ -1,7 +1,17 @@
 <script lang="ts">
 	import Card from '$lib/components/Card.svelte';
 	import { flowpilot, notes } from '$lib/flowpilot';
-	import { buildVaultTags, getVaultMeta, noteColorClasses } from '$lib/note-vault';
+	import {
+		buildVaultTags,
+		getLifeStateMeta,
+		getPriorityMeta,
+		getVaultMeta,
+		NOTE_LIFE_STATE_OPTIONS,
+		NOTE_PRIORITY_OPTIONS,
+		noteColorClasses,
+		type NoteLifeState,
+		type NotePriorityLevel
+	} from '$lib/note-vault';
 	import {
 		buildVaultContent,
 		isImageAttachment,
@@ -14,6 +24,7 @@
 
 	type QuickNoteItem = {
 		note: Note;
+		meta: ReturnType<typeof getVaultMeta>;
 		document: ReturnType<typeof parseVaultContent>;
 		isPinned: boolean;
 		colors: ReturnType<typeof noteColorClasses>;
@@ -26,6 +37,8 @@
 	let quickCaptureMessage = $state<string | null>(null);
 	let quickCaptureMessageTone = $state<'error' | 'info'>('info');
 	let lastQuickCaptureId = $state<string | null>(null);
+	let quickPriority = $state<NotePriorityLevel>('p3');
+	let quickLifeState = $state<NoteLifeState>('seed');
 	let quickCameraInput: HTMLInputElement | null = null;
 	let quickMediaInput: HTMLInputElement | null = null;
 
@@ -37,6 +50,7 @@
 				if (meta.kind !== 'note') return null;
 				return {
 					note,
+					meta,
 					document: parseVaultContent(note.content),
 					isPinned: meta.pinned,
 					colors: noteColorClasses(meta.color)
@@ -63,6 +77,8 @@
 	const resetQuickCapture = () => {
 		quickCaptureText = '';
 		quickCaptureAttachments = [];
+		quickPriority = 'p3';
+		quickLifeState = 'seed';
 		setQuickCaptureMessage(null);
 		if (quickCameraInput) quickCameraInput.value = '';
 		if (quickMediaInput) quickMediaInput.value = '';
@@ -167,6 +183,8 @@
 				kind: 'note',
 				color: 'slate',
 				pinned: false,
+				priority: quickPriority,
+				lifeState: quickLifeState,
 				plainTags: ['capture-rapide']
 			})
 		});
@@ -201,6 +219,39 @@
 				placeholder="Note rapide, commentaire de photo, idee ou chose a ne pas oublier..."
 				bind:value={quickCaptureText}
 			></textarea>
+
+			<div class="mt-4 grid gap-3 md:grid-cols-2">
+				<div>
+					<p class="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">Priorite</p>
+					<div class="flex flex-wrap gap-2">
+						{#each NOTE_PRIORITY_OPTIONS as option}
+							<button
+								class={`rounded-full border px-3 py-2 text-xs font-medium transition ${quickPriority === option.value ? 'text-white shadow-[0_0_18px_rgba(255,255,255,0.08)]' : 'border-white/10 text-zinc-400'}`}
+								style={`border-color: ${quickPriority === option.value ? `${option.accent}66` : ''}; background: linear-gradient(135deg, ${option.accent}22, rgba(15,22,41,0.95));`}
+								type="button"
+								onclick={() => (quickPriority = option.value)}
+							>
+								{option.shortLabel}
+							</button>
+						{/each}
+					</div>
+				</div>
+
+				<div>
+					<p class="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">Etat</p>
+					<div class="flex flex-wrap gap-2">
+						{#each NOTE_LIFE_STATE_OPTIONS as option}
+							<button
+								class={`rounded-full border px-3 py-2 text-xs font-medium transition ${quickLifeState === option.value ? 'border-white/30 bg-white/8 text-white' : 'border-white/10 text-zinc-400'}`}
+								type="button"
+								onclick={() => (quickLifeState = option.value)}
+							>
+								{option.icon} {option.label}
+							</button>
+						{/each}
+					</div>
+				</div>
+			</div>
 
 			<div class="mt-4 flex flex-wrap gap-2">
 				<button
@@ -270,10 +321,10 @@
 										: item.colors.card
 								}`}
 								href="/vault"
-							>
-								<div class="flex items-start justify-between gap-3">
-									<div class="min-w-0">
-										<p class="truncate text-sm font-medium text-white">{item.note.title}</p>
+								>
+									<div class="flex items-start justify-between gap-3">
+										<div class="min-w-0">
+											<p class="truncate text-sm font-medium text-white">{item.note.title}</p>
 										{#if item.document.plainText}
 											<p class="mt-1 max-h-10 overflow-hidden text-sm leading-5 text-zinc-400">
 												{item.document.plainText}
@@ -282,18 +333,19 @@
 											<p class="mt-1 text-sm text-zinc-400">{item.document.attachments.length} media(s) joint(s)</p>
 										{/if}
 									</div>
-									<div class="shrink-0 text-right">
-										<p class="text-xs uppercase tracking-[0.16em] text-zinc-500">
-											{item.note.id === lastQuickCaptureId ? 'Nouvelle' : item.isPinned ? 'Epinglee' : 'Note'}
-										</p>
-										<p class="mt-1 text-xs text-zinc-400">
-											{new Date(item.note.updated_at).toLocaleTimeString('fr-FR', {
-												hour: '2-digit',
-												minute: '2-digit'
-											})}
-										</p>
+										<div class="shrink-0 text-right">
+											<p
+												class={`text-xs uppercase tracking-[0.16em] ${item.meta.priority === 'p0' ? 'animate-pulse' : ''}`}
+												style={`color: ${getPriorityMeta(item.meta.priority).accent};`}
+											>
+												{getPriorityMeta(item.meta.priority).shortLabel}
+											</p>
+											<p class="mt-1 text-xs text-zinc-500">{getLifeStateMeta(item.meta.lifeState).icon}</p>
+											<p class="mt-1 text-xs text-zinc-400">
+												{new Date(item.note.updated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+											</p>
+										</div>
 									</div>
-								</div>
 							</a>
 						{/each}
 					</div>

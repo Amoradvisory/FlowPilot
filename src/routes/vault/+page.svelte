@@ -5,13 +5,21 @@
 	import type { Note, Project } from '$lib/types';
 	import {
 		buildVaultTags,
+		getDecayMeta,
+		getLifeStateMeta,
+		getPriorityMeta,
 		getVaultMeta,
 		matchVaultQuery,
+		NOTE_LIFE_STATE_OPTIONS,
 		NOTE_COLOR_OPTIONS,
+		NOTE_PRIORITY_OPTIONS,
 		noteColorClasses,
 		parseTagInput,
+		priorityOrder,
 		type VaultMeta,
-		type VaultColor
+		type VaultColor,
+		type NoteLifeState,
+		type NotePriorityLevel
 	} from '$lib/note-vault';
 	import {
 		buildCopyableVaultText,
@@ -44,9 +52,12 @@
 	let title = $state('');
 	let content = $state('');
 	let color = $state<VaultColor>('blue');
+	let priority = $state<NotePriorityLevel>('p3');
+	let lifeState = $state<NoteLifeState>('seed');
 	let tagInput = $state('');
 	let projectId = $state('');
 	let pinned = $state(false);
+	let showArchived = $state(false);
 	let copyMessage = $state<string | null>(null);
 	let attachments = $state<VaultAttachment[]>([]);
 	let attachmentUrl = $state('');
@@ -81,12 +92,14 @@
 			.filter((item): item is VaultItem => Boolean(item))
 			.sort((left, right) => {
 				if (left.meta.pinned !== right.meta.pinned) return Number(right.meta.pinned) - Number(left.meta.pinned);
+				if (left.meta.priority !== right.meta.priority) return priorityOrder(left.meta.priority) - priorityOrder(right.meta.priority);
 				return new Date(right.note.updated_at).getTime() - new Date(left.note.updated_at).getTime();
 			})
 	);
 
 	const filteredItems = $derived(
 		vaultItems.filter((item: VaultItem) => {
+			if (!showArchived && item.meta.priority === 'p4') return false;
 			if (colorFilter !== 'all' && item.meta.color !== colorFilter) return false;
 			if (pinnedOnly && !item.meta.pinned) return false;
 			return matchVaultQuery(item.note, search);
@@ -104,6 +117,9 @@
 	);
 	const mediaNoteCount = $derived(
 		vaultItems.filter((item: VaultItem) => item.document.attachments.length > 0).length
+	);
+	const ghostNoteCount = $derived(
+		vaultItems.filter((item: VaultItem) => getDecayMeta(item.note, item.meta).band === 'ghost').length
 	);
 
 	const setMediaMessage = (message: string | null, tone: 'error' | 'info' = 'info') => {
@@ -152,6 +168,8 @@
 		title = '';
 		content = '';
 		color = 'blue';
+		priority = 'p3';
+		lifeState = 'seed';
 		tagInput = '';
 		projectId = '';
 		pinned = false;
@@ -169,6 +187,8 @@
 		title = current.note.title;
 		content = current.document.plainText;
 		color = current.meta.color;
+		priority = current.meta.priority;
+		lifeState = current.meta.lifeState;
 		tagInput = current.meta.plainTags.join(', ');
 		projectId = current.note.project_id ?? '';
 		pinned = current.meta.pinned;
@@ -345,6 +365,8 @@
 				kind: 'note',
 				color,
 				pinned,
+				priority,
+				lifeState,
 				plainTags
 			})
 		};
@@ -366,6 +388,8 @@
 				kind: 'note',
 				color: current.meta.color,
 				pinned: !current.meta.pinned,
+				priority: current.meta.priority,
+				lifeState: current.meta.lifeState,
 				plainTags: current.meta.plainTags
 			})
 		});
@@ -588,20 +612,20 @@
 				<p class="text-xs uppercase tracking-[0.22em] text-[#8fcaff]">Notes</p>
 				<h1 class="mt-3 text-3xl font-semibold text-white">Notes, idees, photos et memos</h1>
 				<p class="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">
-					Ton espace personnel pour garder ensemble les notes rapides, les photos commentees et les memos utiles, sans separer cela du reste de FlowPilot.
+					Ton espace personnel pour garder ensemble les notes rapides, les photos commentees et les memos utiles, sans les disperser.
 				</p>
 			</div>
 
 			<div class="max-w-md rounded-3xl border border-white/8 bg-black/20 px-4 py-4">
 				<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Mode actuel</p>
 				<p class="mt-2 text-sm text-zinc-300">
-					Ici, on se concentre uniquement sur les notes. Les prompts et snippets reviendront plus tard dans un produit separe.
+					Ici, on se concentre sur les notes vivantes: priorite, etat de vie, decay et classement immediat.
 				</p>
 			</div>
 		</div>
 	</Card>
 
-	<div class="grid gap-4 md:grid-cols-3">
+	<div class="grid gap-4 md:grid-cols-4">
 		<Card class="bg-[linear-gradient(135deg,rgba(255,79,216,0.08),transparent_65%),#111]">
 			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Notes</p>
 			<p class="mt-2 text-3xl font-semibold text-white">{vaultItems.length}</p>
@@ -613,6 +637,10 @@
 		<Card class="bg-[linear-gradient(135deg,rgba(34,197,94,0.08),transparent_65%),#111]">
 			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Notes avec media</p>
 			<p class="mt-2 text-3xl font-semibold text-white">{mediaNoteCount}</p>
+		</Card>
+		<Card class="bg-[linear-gradient(135deg,rgba(255,45,85,0.08),transparent_65%),#111]">
+			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Fantomes</p>
+			<p class="mt-2 text-3xl font-semibold text-white">{ghostNoteCount}</p>
 		</Card>
 	</div>
 
@@ -669,6 +697,37 @@
 								onclick={() => (color = option.value)}
 							>
 								{option.label}
+							</button>
+						{/each}
+					</div>
+				</div>
+
+				<div>
+					<p class="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">Priorite chromee</p>
+					<div class="flex flex-wrap gap-2">
+						{#each NOTE_PRIORITY_OPTIONS as option}
+							<button
+								class={`rounded-full border px-3 py-2 text-xs font-medium transition ${priority === option.value ? 'text-white shadow-[0_0_18px_rgba(255,255,255,0.08)]' : 'border-white/10 text-zinc-400'}`}
+								style={`border-color: ${priority === option.value ? `${option.accent}66` : ''}; background: linear-gradient(135deg, ${option.accent}22, rgba(15,22,41,0.95));`}
+								type="button"
+								onclick={() => (priority = option.value)}
+							>
+								{option.icon} {option.shortLabel}
+							</button>
+						{/each}
+					</div>
+				</div>
+
+				<div>
+					<p class="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">Etat de vie</p>
+					<div class="flex flex-wrap gap-2">
+						{#each NOTE_LIFE_STATE_OPTIONS as option}
+							<button
+								class={`rounded-full border px-3 py-2 text-xs font-medium transition ${lifeState === option.value ? 'border-white/30 bg-white/8 text-white' : 'border-white/10 text-zinc-400'}`}
+								type="button"
+								onclick={() => (lifeState = option.value)}
+							>
+								{option.icon} {option.label}
 							</button>
 						{/each}
 					</div>
@@ -833,6 +892,11 @@
 						<input class="h-4 w-4 accent-[#FF4FD8]" type="checkbox" bind:checked={pinnedOnly} />
 						Afficher seulement les elements epingles
 					</label>
+
+					<label class="flex items-center gap-3 text-sm text-zinc-300">
+						<input class="h-4 w-4 accent-[#00D4FF]" type="checkbox" bind:checked={showArchived} />
+						Afficher aussi les notes archivees P4
+					</label>
 				</div>
 			</Card>
 
@@ -844,11 +908,23 @@
 								<div class="flex items-center gap-2">
 									<span class={`h-2.5 w-2.5 rounded-full ${item.colors.dot}`}></span>
 									<span class={`rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] ${item.colors.chip}`}>Note</span>
+									<span
+										class={`rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] ${item.meta.priority === 'p0' ? 'animate-pulse' : ''}`}
+										style={`border-color: ${getPriorityMeta(item.meta.priority).accent}44; background: ${getPriorityMeta(item.meta.priority).accent}18; color: ${getPriorityMeta(item.meta.priority).accent};`}
+									>
+										{getPriorityMeta(item.meta.priority).shortLabel}
+									</span>
+									<span class="rounded-full border border-white/10 px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-zinc-300">
+										{getLifeStateMeta(item.meta.lifeState).icon} {getLifeStateMeta(item.meta.lifeState).label}
+									</span>
 									{#if item.meta.pinned}
 										<span class="rounded-full border border-amber-400/20 bg-amber-400/10 px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-amber-200">
 											Pin
 										</span>
 									{/if}
+									<span class="rounded-full border border-white/10 px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-zinc-400">
+										{getDecayMeta(item.note, item.meta).icon} {getDecayMeta(item.note, item.meta).label}
+									</span>
 								</div>
 
 								<div class="flex flex-wrap justify-end gap-2">
@@ -946,7 +1022,7 @@
 							{/if}
 
 							<p class="mt-4 text-xs text-zinc-500">
-								Mis a jour le {new Date(item.note.updated_at).toLocaleString('fr-FR')}
+								Mis a jour le {new Date(item.note.updated_at).toLocaleString('fr-FR')} · {getDecayMeta(item.note, item.meta).daysOld} jour(s)
 							</p>
 						</Card>
 					{/each}

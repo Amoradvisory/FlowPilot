@@ -20,23 +20,23 @@
 <div class="flex min-h-screen items-center justify-center px-4 py-10">
 	<Card class="w-full max-w-md" tone="active">
 		<div class="mb-6 space-y-2">
-			<p class="text-xs uppercase tracking-[0.2em] text-[#3399FF]">FlowPilot</p>
-			<h1 class="text-3xl font-semibold text-white">Cockpit personnel</h1>
+			<p class="text-xs uppercase tracking-[0.2em] text-[#00D4FF]">Nexus Notes</p>
+			<h1 class="text-3xl font-semibold text-white">Memoire augmentee</h1>
 			<p class="text-sm text-zinc-400">
-				Connexion email/mot de passe ou Google pour synchroniser Android et desktop.
+				Connexion email/mot de passe ou Google pour retrouver tes notes sur tous tes appareils.
 			</p>
 		</div>
 
 		<div class="mb-4 inline-flex rounded-2xl border border-white/10 bg-black/20 p-1">
 			<button
-				class={`rounded-2xl px-3 py-2 text-sm transition ${mode === 'login' ? 'bg-white/10 text-white' : 'text-zinc-400'}`}
+				class={`rounded-2xl px-3 py-2 text-sm transition ${mode === 'login' ? 'bg-[#00D4FF]/12 text-white' : 'text-zinc-400'}`}
 				type="button"
 				onclick={() => (mode = 'login')}
 			>
 				Connexion
 			</button>
 			<button
-				class={`rounded-2xl px-3 py-2 text-sm transition ${mode === 'signup' ? 'bg-white/10 text-white' : 'text-zinc-400'}`}
+				class={`rounded-2xl px-3 py-2 text-sm transition ${mode === 'signup' ? 'bg-[#7B2FFF]/16 text-white' : 'text-zinc-400'}`}
 				type="button"
 				onclick={() => (mode = 'signup')}
 			>
@@ -47,7 +47,7 @@
 		<form class="space-y-3" onsubmit={(event) => { event.preventDefault(); void submit(); }}>
 			{#if mode === 'signup'}
 				<input
-					class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none transition focus:border-[#3399FF]/50"
+					class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none transition focus:border-[#00D4FF]/50"
 					type="text"
 					placeholder="Nom"
 					bind:value={displayName}
@@ -55,19 +55,19 @@
 			{/if}
 
 			<input
-				class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none transition focus:border-[#3399FF]/50"
+				class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none transition focus:border-[#00D4FF]/50"
 				type="email"
 				placeholder="Email"
 				bind:value={email}
 			/>
 			<input
-				class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none transition focus:border-[#3399FF]/50"
+				class="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none transition focus:border-[#00D4FF]/50"
 				type="password"
 				placeholder="Mot de passe"
 				bind:value={password}
 			/>
 
-			<button class="w-full rounded-2xl bg-[#3399FF] px-4 py-3 text-sm font-semibold text-white" type="submit">
+			<button class="w-full rounded-2xl bg-[#00D4FF] px-4 py-3 text-sm font-semibold text-[#07111d]" type="submit">
 				{mode === 'login' ? 'Se connecter' : 'Creer mon compte'}
 			</button>
 		</form>

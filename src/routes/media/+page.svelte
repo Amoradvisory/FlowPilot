@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Card from '$lib/components/Card.svelte';
 	import { notes } from '$lib/flowpilot';
-	import { getVaultMeta, noteColorClasses, type VaultMeta } from '$lib/note-vault';
+	import { getDecayMeta, getPriorityMeta, getVaultMeta, noteColorClasses, type VaultMeta } from '$lib/note-vault';
 	import {
 		isAudioAttachment,
 		isImageAttachment,
@@ -39,8 +39,8 @@
 </script>
 
 <div class="space-y-4">
-	<Card tone="active" class="overflow-hidden border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(51,153,255,0.18),transparent_34%),#101114]">
-		<p class="text-xs uppercase tracking-[0.22em] text-[#8fcaff]">Medias</p>
+	<Card tone="active" class="overflow-hidden border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(0,212,255,0.18),transparent_34%),#101114]">
+		<p class="text-xs uppercase tracking-[0.22em] text-[#8feeff]">Medias</p>
 		<h1 class="mt-3 text-3xl font-semibold text-white">Galerie des notes avec media</h1>
 		<p class="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">
 			Toutes les notes qui contiennent une image, une video, un audio ou un lien enrichi.
@@ -67,10 +67,15 @@
 					{/if}
 
 					<div class="mt-4">
-						<p class="font-medium text-white">{item.note.title}</p>
+						<div class="flex items-start justify-between gap-3">
+							<p class="font-medium text-white">{item.note.title}</p>
+							<p class="text-xs uppercase tracking-[0.16em]" style={`color: ${getPriorityMeta(item.meta.priority).accent};`}>
+								{getPriorityMeta(item.meta.priority).shortLabel}
+							</p>
+						</div>
 						<p class="mt-1 text-sm text-zinc-400">{item.document.plainText || 'Note media sans texte additionnel.'}</p>
 						<p class="mt-3 text-xs text-zinc-500">
-							{item.document.attachments.length} media(s) · mis a jour le {new Date(item.note.updated_at).toLocaleString('fr-FR')}
+							{item.document.attachments.length} media(s) · {getDecayMeta(item.note, item.meta).label} · mis a jour le {new Date(item.note.updated_at).toLocaleString('fr-FR')}
 						</p>
 					</div>
 				</Card>

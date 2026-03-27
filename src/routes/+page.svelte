@@ -2,7 +2,14 @@
 	import Card from '$lib/components/Card.svelte';
 	import QuickNotesPanel from '$lib/components/QuickNotesPanel.svelte';
 	import { notes } from '$lib/flowpilot';
-	import { NOTE_COLOR_OPTIONS, getVaultMeta, noteColorClasses, type VaultMeta } from '$lib/note-vault';
+	import {
+		NOTE_COLOR_OPTIONS,
+		getDecayMeta,
+		getPriorityMeta,
+		getVaultMeta,
+		noteColorClasses,
+		type VaultMeta
+	} from '$lib/note-vault';
 	import {
 		isAudioAttachment,
 		isImageAttachment,
@@ -46,6 +53,12 @@
 	const quickCaptureNotes = $derived(
 		noteItems.filter((item: NoteDashboardItem) => item.meta.plainTags.includes('capture-rapide'))
 	);
+	const urgentNotes = $derived(
+		noteItems.filter((item: NoteDashboardItem) => item.meta.priority === 'p0' || item.meta.priority === 'p1')
+	);
+	const ghostNotes = $derived(
+		noteItems.filter((item: NoteDashboardItem) => getDecayMeta(item.note, item.meta).band === 'ghost')
+	);
 	const recentNotes = $derived(noteItems.slice(0, 6));
 	const topTags = $derived.by(() => {
 		const counts = new Map<string, number>();
@@ -87,9 +100,9 @@
 			<p class="mt-2 text-sm text-zinc-400">Images, videos, audio et liens gardes dans les notes.</p>
 		</Card>
 		<Card class="bg-[linear-gradient(135deg,rgba(245,158,11,0.08),transparent_65%),#111]">
-			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Epinglees</p>
-			<p class="mt-2 text-3xl font-semibold text-white">{pinnedNotes.length}</p>
-			<p class="mt-2 text-sm text-zinc-400">Tes notes prioritaires restent au premier plan.</p>
+			<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">A surveiller</p>
+			<p class="mt-2 text-3xl font-semibold text-white">{urgentNotes.length + ghostNotes.length}</p>
+			<p class="mt-2 text-sm text-zinc-400">{urgentNotes.length} urgente(s), {ghostNotes.length} fantome(s).</p>
 		</Card>
 	</div>
 
@@ -114,9 +127,10 @@
 									<p class="mt-1 text-sm text-zinc-400">{summarizeVaultContent(item.note.content, 120)}</p>
 								</div>
 								<div class="shrink-0 text-right">
-									{#if item.document.attachments.length}
-										<p class="text-xs uppercase tracking-[0.16em] text-zinc-500">{item.document.attachments.length} media(s)</p>
-									{/if}
+									<p class="text-xs uppercase tracking-[0.16em]" style={`color: ${getPriorityMeta(item.meta.priority).accent};`}>
+										{getPriorityMeta(item.meta.priority).shortLabel}
+									</p>
+									<p class="mt-1 text-xs text-zinc-500">{getDecayMeta(item.note, item.meta).label}</p>
 									<p class="mt-1 text-xs text-zinc-500">
 										{new Date(item.note.updated_at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
 									</p>
@@ -189,6 +203,9 @@
 						<a class={`block rounded-2xl border px-4 py-3 transition hover:border-white/14 ${item.colors.card}`} href="/vault">
 							<p class="font-medium text-white">{item.note.title}</p>
 							<p class="mt-1 text-sm text-zinc-400">{summarizeVaultContent(item.note.content, 110)}</p>
+							<p class="mt-2 text-xs text-zinc-500">
+								{getPriorityMeta(item.meta.priority).shortLabel} · {getDecayMeta(item.note, item.meta).label}
+							</p>
 						</a>
 					{/each}
 				{:else}

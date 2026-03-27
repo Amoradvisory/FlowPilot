@@ -40,16 +40,16 @@
 </svelte:head>
 
 {#if !$authState.ready}
-	<div class="flex min-h-screen items-center justify-center text-sm text-zinc-400">Initialisation de FlowPilot...</div>
+	<div class="flex min-h-screen items-center justify-center text-sm text-zinc-400">Initialisation de Nexus Notes...</div>
 {:else if $authState.configured && !$authState.user}
 	<AuthGate />
 {:else}
 	<div class="shell-grid bg-transparent">
-		<aside class="hidden border-r border-white/6 bg-black/20 p-5 lg:flex lg:flex-col">
+		<aside class="glass-panel hidden border-r border-white/6 bg-black/20 p-5 lg:flex lg:flex-col">
 			<div class="mb-8">
-				<p class="text-xs uppercase tracking-[0.2em] text-[#3399FF]">FlowPilot Notes</p>
-				<h1 class="mt-2 text-2xl font-semibold text-white">Notebook</h1>
-				<p class="mt-2 text-sm text-zinc-500">Capturer, classer et retrouver tes notes et medias dans un seul espace.</p>
+				<p class="text-xs uppercase tracking-[0.2em] text-[#00D4FF]">Nexus Notes</p>
+				<h1 class="mt-2 text-2xl font-semibold text-white">Neural notebook</h1>
+				<p class="mt-2 text-sm text-zinc-500">Capturer, connecter et retrouver une pensee avec precision.</p>
 			</div>
 
 			{#if $authState.user}
@@ -86,8 +86,8 @@
 				{/each}
 			</nav>
 
-			<div class="mt-auto rounded-3xl border border-white/6 bg-[#111] p-4">
-				<p class="text-sm font-medium text-white">Sync</p>
+				<div class="glass-panel mt-auto rounded-3xl border border-white/6 bg-[#111]/80 p-4">
+					<p class="text-sm font-medium text-white">Sync</p>
 				<p class="mt-2 text-sm text-zinc-400">
 					{$syncState.running ? 'Synchronisation...' : `${$syncState.pending} changement(s) en attente`}
 				</p>
@@ -98,7 +98,7 @@
 		</aside>
 
 		<div class="relative flex min-h-screen flex-col">
-			<header class="sticky top-0 z-30 flex items-center justify-between border-b border-white/6 bg-[#0a0a0a]/92 px-4 py-3 backdrop-blur md:px-6">
+			<header class="glass-panel sticky top-0 z-30 flex items-center justify-between border-b border-white/6 bg-[#0A0E1A]/86 px-4 py-3 md:px-6">
 				<div class="flex items-center gap-3">
 					<button
 						class="rounded-2xl border border-white/10 px-3 py-2 text-sm text-zinc-300 lg:hidden"
@@ -109,7 +109,7 @@
 					</button>
 					<div>
 						<p class="text-sm font-semibold text-white">{pageLabel()}</p>
-						<p class="text-xs text-zinc-500">{$syncState.running ? 'sync active' : 'local-first'}</p>
+						<p class="text-xs text-zinc-500">{$syncState.running ? 'sync active' : 'offline-first'}</p>
 					</div>
 				</div>
 
@@ -140,7 +140,7 @@
 				{@render children()}
 			</main>
 
-			<nav class="fixed inset-x-0 bottom-0 z-30 border-t border-white/6 bg-[#0a0a0a]/96 px-2 pb-4 pt-2 backdrop-blur lg:hidden">
+			<nav class="glass-panel fixed inset-x-0 bottom-0 z-30 border-t border-white/6 bg-[#0A0E1A]/92 px-2 pb-4 pt-2 lg:hidden">
 				<div class="grid items-center" style={`grid-template-columns: repeat(${NAV_ITEMS.length}, minmax(0, 1fr));`}>
 					{#each NAV_ITEMS as item}
 						<a class={`flex flex-col items-center gap-1 rounded-2xl px-2 py-2 text-xs ${isActive(item.href) ? 'text-white' : 'text-zinc-500'}`} href={item.href}>

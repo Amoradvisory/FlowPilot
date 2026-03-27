@@ -1,11 +1,11 @@
 {
-	"name": "FlowPilot",
-	"short_name": "FlowPilot",
-	"description": "Cockpit personnel de productivite, local-first, offline et synchronise.",
+	"name": "Nexus Notes",
+	"short_name": "Nexus",
+	"description": "Application de prise de notes locale, rapide, vivante et synchronisee.",
 	"start_url": "/",
 	"display": "standalone",
-	"background_color": "#0a0a0a",
-	"theme_color": "#0a0a0a",
+	"background_color": "#0A0E1A",
+	"theme_color": "#0A0E1A",
 	"orientation": "portrait-primary",
 	"icons": [
 		{
