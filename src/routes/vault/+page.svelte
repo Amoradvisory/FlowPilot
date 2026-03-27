@@ -64,6 +64,7 @@
 	let quickCaptureAttachments = $state<VaultAttachment[]>([]);
 	let quickCaptureMessage = $state<string | null>(null);
 	let quickCaptureMessageTone = $state<'error' | 'info'>('info');
+	let lastQuickCaptureId = $state<string | null>(null);
 	let mediaMessage = $state<string | null>(null);
 	let mediaMessageTone = $state<'error' | 'info'>('info');
 	let fileInput: HTMLInputElement | null = null;
@@ -97,6 +98,12 @@
 			if (pinnedOnly && !item.meta.pinned) return false;
 			return matchVaultQuery(item.note, search);
 		})
+	);
+
+	const recentQuickCaptures = $derived(
+		vaultItems
+			.filter((item: VaultItem) => item.meta.kind === 'note' && item.meta.plainTags.includes('capture-rapide'))
+			.slice(0, 4)
 	);
 
 	const pinnedCount = $derived(vaultItems.filter((item: VaultItem) => item.meta.pinned).length);
@@ -336,7 +343,7 @@
 	const submitQuickCapture = async () => {
 		if (!quickCaptureText.trim() && !quickCaptureAttachments.length) return;
 
-		await flowpilot.createNote({
+		const savedNote = await flowpilot.createNote({
 			title: quickCaptureTitle(),
 			content: buildVaultContent(quickCaptureText, quickCaptureAttachments),
 			tags: buildVaultTags({
@@ -347,8 +354,9 @@
 			})
 		});
 
+		lastQuickCaptureId = savedNote?.id ?? null;
 		resetQuickCapture();
-		setQuickCaptureMessage('Capture rapide ajoutee au Vault.');
+		setQuickCaptureMessage('Capture rapide ajoutee au Vault. Elle apparait juste en dessous.');
 	};
 
 	const submit = async () => {
@@ -483,6 +491,62 @@
 					<p class={`mt-3 text-sm ${quickCaptureMessageTone === 'error' ? 'text-rose-300' : 'text-[#8fcaff]'}`}>
 						{quickCaptureMessage}
 					</p>
+				{/if}
+
+				{#if recentQuickCaptures.length}
+					<div class="mt-5 rounded-3xl border border-white/8 bg-black/20 p-4">
+						<div class="flex items-center justify-between gap-3">
+							<div>
+								<p class="text-xs uppercase tracking-[0.2em] text-zinc-500">Dernieres captures rapides</p>
+								<p class="mt-2 text-sm text-zinc-400">
+									Retrouve tout de suite les dernieres notes saisies ici.
+								</p>
+							</div>
+							<p class="text-xs uppercase tracking-[0.16em] text-zinc-500">
+								{recentQuickCaptures.length} visible(s)
+							</p>
+						</div>
+
+						<div class="mt-4 space-y-3">
+							{#each recentQuickCaptures as item}
+								<button
+									class={`w-full rounded-2xl border px-4 py-3 text-left transition ${
+										item.note.id === lastQuickCaptureId
+											? 'border-[#3399FF]/40 bg-[#3399FF]/10 shadow-[0_0_20px_rgba(51,153,255,0.12)]'
+											: 'border-white/8 bg-white/[0.03] hover:border-white/14'
+									}`}
+									type="button"
+									onclick={() => startEdit(item.note.id)}
+								>
+									<div class="flex items-start justify-between gap-3">
+										<div class="min-w-0">
+											<p class="truncate text-sm font-medium text-white">{item.note.title}</p>
+											{#if item.document.plainText}
+												<p class="mt-1 max-h-10 overflow-hidden text-sm leading-5 text-zinc-400">
+													{item.document.plainText}
+												</p>
+											{:else if item.document.attachments.length}
+												<p class="mt-1 text-sm text-zinc-400">
+													{item.document.attachments.length} media(s) joint(s)
+												</p>
+											{/if}
+										</div>
+										<div class="shrink-0 text-right">
+											<p class="text-xs uppercase tracking-[0.16em] text-zinc-500">
+												{item.note.id === lastQuickCaptureId ? 'Nouvelle' : 'Capture'}
+											</p>
+											<p class="mt-1 text-xs text-zinc-400">
+												{new Date(item.note.updated_at).toLocaleTimeString('fr-FR', {
+													hour: '2-digit',
+													minute: '2-digit'
+												})}
+											</p>
+										</div>
+									</div>
+								</button>
+							{/each}
+						</div>
+					</div>
 				{/if}
 			</div>
 

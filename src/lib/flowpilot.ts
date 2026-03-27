@@ -1263,17 +1263,17 @@ class FlowPilotController {
 		await this.saveEntity('projects', { ...current, ...partial });
 	}
 
-	async createNote(partial: Partial<Note> & Pick<Note, 'title'>) {
+	async createNote(partial: Partial<Note> & Pick<Note, 'title'>): Promise<Note | null> {
 		const userId = get(currentUserId);
-		if (!userId) return;
-		await this.saveEntity('notes', {
+		if (!userId) return null;
+		return (await this.saveEntity('notes', {
 			user_id: userId,
 			title: partial.title,
 			content: partial.content ?? null,
 			project_id: partial.project_id ?? null,
 			tags: partial.tags ?? [],
 			deleted_at: null
-		});
+		})) as Note | null;
 	}
 
 	async updateNote(id: string, partial: Partial<Note>) {
