@@ -1560,6 +1560,7 @@ class FlowPilotController {
 			email,
 			password,
 			options: {
+				emailRedirectTo: browser ? `${window.location.origin}/auth/callback` : undefined,
 				data: {
 					full_name: displayName
 				}
