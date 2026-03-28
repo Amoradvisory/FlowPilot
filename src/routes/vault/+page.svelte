@@ -2,7 +2,9 @@
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { tick } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
+	import { fly } from 'svelte/transition';
+	import { Mic } from 'lucide-svelte';
 	import Card from '$lib/components/Card.svelte';
 	import NoteContentRenderer from '$lib/components/NoteContentRenderer.svelte';
 	import { flowpilot, notes } from '$lib/flowpilot';
@@ -56,8 +58,49 @@
 		colors: ReturnType<typeof noteColorClasses>;
 	};
 	type EditorFocusTarget = 'search' | 'title' | 'content';
+	type SpeechRecognitionAlternativeLike = {
+		transcript: string;
+	};
+	type SpeechRecognitionResultLike = {
+		0: SpeechRecognitionAlternativeLike;
+		isFinal: boolean;
+		length: number;
+	};
+	type SpeechRecognitionEventLike = Event & {
+		resultIndex: number;
+		results: ArrayLike<SpeechRecognitionResultLike>;
+	};
+	type SpeechRecognitionErrorEventLike = Event & {
+		error?: string;
+	};
+	type BrowserSpeechRecognition = EventTarget & {
+		continuous: boolean;
+		lang: string;
+		interimResults: boolean;
+		maxAlternatives: number;
+		onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+		onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+		onend: (() => void) | null;
+		start: () => void;
+		stop: () => void;
+		abort: () => void;
+	};
+	type SpeechRecognitionCtor = new () => BrowserSpeechRecognition;
+	type SpeechRecognitionWindow = Window & {
+		SpeechRecognition?: SpeechRecognitionCtor;
+		webkitSpeechRecognition?: SpeechRecognitionCtor;
+	};
 
 	const MAX_EMBED_FILE_BYTES = 5 * 1024 * 1024;
+	const NOTE_GRADIENT_ACCENTS: Record<VaultColor, string> = {
+		blue: '#00D4FF',
+		pink: '#7B2FFF',
+		green: '#00FF9C',
+		amber: '#FFB800',
+		violet: '#7B2FFF',
+		rose: '#FF2D55',
+		slate: '#4A5580'
+	};
 
 	let search = $state('');
 	let colorFilter = $state<'all' | VaultColor>('all');
@@ -83,6 +126,8 @@
 	let titleInput = $state<HTMLInputElement | null>(null);
 	let contentTextarea = $state<HTMLTextAreaElement | null>(null);
 	let handledRouteQuery = $state('');
+	let speechRecognition = $state<BrowserSpeechRecognition | null>(null);
+	let isListening = $state(false);
 
 	const vaultItems = $derived(
 		$notes
@@ -138,10 +183,22 @@
 		todayCount: velocity.createdToday,
 		weekCount: velocity.createdThisWeek
 	});
+	const voiceSupported = $derived(
+		browser &&
+			Boolean(
+				(window as SpeechRecognitionWindow).SpeechRecognition ||
+				(window as SpeechRecognitionWindow).webkitSpeechRecognition
+			)
+	);
 
 	const setMediaMessage = (message: string | null, tone: 'error' | 'info' = 'info') => {
 		mediaMessage = message;
 		mediaMessageTone = tone;
+	};
+
+	const noteHeaderGradientStyle = (noteColor: VaultColor) => {
+		const accent = NOTE_GRADIENT_ACCENTS[noteColor];
+		return `background: linear-gradient(135deg, ${accent}2e 0%, ${accent}0a 100%);`;
 	};
 
 	const formatBytes = (value: number | null) => {
@@ -161,6 +218,10 @@
 	};
 
 	const resetForm = () => {
+		if (isListening) {
+			speechRecognition?.stop();
+			isListening = false;
+		}
 		editingId = null;
 		title = '';
 		content = '';
@@ -190,6 +251,77 @@
 		}
 		titleInput?.focus();
 		titleInput?.select();
+	};
+
+	const speechRecognitionCtor = (): SpeechRecognitionCtor | null => {
+		if (!browser) return null;
+		const speechWindow = window as SpeechRecognitionWindow;
+		return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition ?? null;
+	};
+
+	const ensureSpeechRecognition = () => {
+		const Ctor = speechRecognitionCtor();
+		if (!Ctor) return null;
+		if (speechRecognition) return speechRecognition;
+
+		const recognition = new Ctor();
+		recognition.lang = 'fr-FR';
+		recognition.continuous = true;
+		recognition.interimResults = false;
+		recognition.maxAlternatives = 1;
+		recognition.onresult = (event) => {
+			const transcriptParts: string[] = [];
+			for (let index = event.resultIndex; index < event.results.length; index += 1) {
+				const result = event.results[index];
+				const transcript = result?.[0]?.transcript?.trim();
+				if (result?.isFinal && transcript) {
+					transcriptParts.push(transcript);
+				}
+			}
+
+			if (transcriptParts.length) {
+				const nextTranscript = transcriptParts.join('\n');
+				content = content.trimEnd() ? `${content.trimEnd()}\n${nextTranscript}` : nextTranscript;
+				void focusEditorTarget('content');
+			}
+		};
+		recognition.onerror = (event) => {
+			isListening = false;
+			setMediaMessage(
+				`Dictée vocale interrompue${event.error ? ` (${event.error})` : ''}.`,
+				'error'
+			);
+		};
+		recognition.onend = () => {
+			isListening = false;
+		};
+
+		speechRecognition = recognition;
+		return recognition;
+	};
+
+	const toggleVoiceCapture = async () => {
+		const recognition = ensureSpeechRecognition();
+		if (!recognition) {
+			setMediaMessage('Web Speech API indisponible sur cet appareil.', 'error');
+			return;
+		}
+
+		if (isListening) {
+			recognition.stop();
+			isListening = false;
+			setMediaMessage('Dictée vocale arretee.');
+			return;
+		}
+
+		try {
+			recognition.start();
+			isListening = true;
+			setMediaMessage('Dictée vocale active. Parle maintenant.');
+			await focusEditorTarget('content');
+		} catch {
+			setMediaMessage('Impossible de demarrer la dictée vocale.', 'error');
+		}
 	};
 
 	const parseFocusTarget = (value: string | null): EditorFocusTarget =>
@@ -396,6 +528,10 @@
 		}, 1600);
 	};
 
+	onDestroy(() => {
+		speechRecognition?.abort();
+	});
+
 	$effect(() => {
 		if (page.url.pathname !== '/vault') return;
 
@@ -483,15 +619,30 @@
 						{editingId ? 'Modifier une note' : 'Ajouter une note'}
 					</h2>
 				</div>
-				{#if editingId}
+				<div class="flex items-center gap-2">
 					<button
-						class="rounded-2xl border border-white/10 px-3 py-2 text-sm text-zinc-300"
+						class={`inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm transition ${
+							isListening
+								? 'voice-live border-[#FF2D55]/50 bg-[#FF2D55]/14 text-white'
+								: 'border-white/10 text-zinc-300 hover:border-white/20 hover:text-white'
+						} ${!voiceSupported ? 'cursor-not-allowed opacity-50' : ''}`}
 						type="button"
-						onclick={resetForm}
+						disabled={!voiceSupported}
+						onclick={() => void toggleVoiceCapture()}
 					>
-						Annuler
+						<Mic size={16} strokeWidth={2} />
+						<span>{isListening ? 'Voix active' : 'Voix'}</span>
 					</button>
-				{/if}
+					{#if editingId}
+						<button
+							class="rounded-2xl border border-white/10 px-3 py-2 text-sm text-zinc-300"
+							type="button"
+							onclick={resetForm}
+						>
+							Annuler
+						</button>
+					{/if}
+				</div>
 			</div>
 
 			<div class="mt-4 space-y-4">
@@ -785,186 +936,196 @@
 				</div>
 			</Card>
 
-			<div class="grid gap-4 lg:grid-cols-2">
+			<div class="vault-masonry">
 				{#if filteredItems.length}
-					{#each filteredItems as item}
-						<Card class={`overflow-hidden ${item.colors.card}`}>
-							<div class="flex items-start justify-between gap-3">
-								<div class="flex items-center gap-2">
-									<span class={`h-2.5 w-2.5 rounded-full ${item.colors.dot}`}></span>
-									<span
-										class={`rounded-full border px-2.5 py-1 text-[11px] tracking-[0.16em] uppercase ${item.colors.chip}`}
-										>Note</span
-									>
-									<span
-										class={`rounded-full border px-2.5 py-1 text-[11px] tracking-[0.16em] uppercase ${item.meta.priority === 'p0' ? 'animate-pulse' : ''}`}
-										style={`border-color: ${getPriorityMeta(item.meta.priority).accent}44; background: ${getPriorityMeta(item.meta.priority).accent}18; color: ${getPriorityMeta(item.meta.priority).accent};`}
-									>
-										{getPriorityMeta(item.meta.priority).shortLabel}
-									</span>
-									<span
-										class="rounded-full border border-white/10 px-2 py-1 text-[11px] tracking-[0.16em] text-zinc-300 uppercase"
-									>
-										{getLifeStateMeta(item.meta.lifeState).icon}
-										{getLifeStateMeta(item.meta.lifeState).label}
-									</span>
-									{#if item.meta.pinned}
-										<span
-											class="rounded-full border border-amber-400/20 bg-amber-400/10 px-2 py-1 text-[11px] tracking-[0.16em] text-amber-200 uppercase"
-										>
-											Pin
-										</span>
-									{/if}
-									<span
-										class="rounded-full border border-white/10 px-2 py-1 text-[11px] tracking-[0.16em] text-zinc-400 uppercase"
-									>
-										{getDecayMeta(item.note, item.meta).label}
-									</span>
-								</div>
-
-								<div class="flex flex-wrap justify-end gap-2">
-									<button
-										class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300"
-										type="button"
-										onclick={() => copyContent(item.note.id, item.note.content)}
-									>
-										{copyMessage === item.note.id ? 'Copie' : 'Copier'}
-									</button>
-									<button
-										class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300"
-										type="button"
-										onclick={() => startEdit(item.note.id)}
-									>
-										Editer
-									</button>
-									<button
-										class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300"
-										type="button"
-										onclick={() => togglePinned(item.note.id)}
-									>
-										{item.meta.pinned ? 'Unpin' : 'Pin'}
-									</button>
-									<button
-										class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300"
-										type="button"
-										onclick={() => duplicate(item.note.id)}
-									>
-										Dupliquer
-									</button>
-									<button
-										class="rounded-full border border-red-500/20 px-2.5 py-1 text-xs text-red-300"
-										type="button"
-										onclick={() => flowpilot.deleteNote(item.note.id)}
-									>
-										Supprimer
-									</button>
-								</div>
-							</div>
-
-							<h2 class="mt-4 text-xl font-semibold text-white">{item.note.title}</h2>
-
-							{#if item.document.plainText}
-								<div class="mt-4 rounded-2xl border border-white/6 bg-black/25 p-4">
-									<NoteContentRenderer text={item.document.plainText} compact />
-								</div>
-							{:else if !item.document.attachments.length}
-								<p class="mt-4 text-sm text-zinc-500">Contenu vide.</p>
-							{/if}
-
-							{#if item.document.attachments.length}
-								<div class="mt-4 space-y-3">
-									{#each item.document.attachments as attachment}
-										<div class="overflow-hidden rounded-2xl border border-white/8 bg-black/25">
-											<div
-												class="flex items-center justify-between gap-3 border-b border-white/6 px-4 py-3"
+					{#each filteredItems as item, index (item.note.id)}
+						<div class="vault-masonry-item" in:fly={{ y: 16, duration: 200, delay: index * 25 }}>
+							<Card class={`overflow-hidden ${item.colors.card}`} padding="p-0">
+								<div
+									class="h-12 border-b border-white/8"
+									style={noteHeaderGradientStyle(item.meta.color)}
+								></div>
+								<div class="p-5">
+									<div class="flex items-start justify-between gap-3">
+										<div class="flex items-center gap-2">
+											<span class={`h-2.5 w-2.5 rounded-full ${item.colors.dot}`}></span>
+											<span
+												class={`rounded-full border px-2.5 py-1 text-[11px] tracking-[0.16em] uppercase ${item.colors.chip}`}
+												>Note</span
 											>
-												<div>
-													<p class="text-sm font-medium text-white">{attachment.title}</p>
-													<p class="mt-1 text-xs text-zinc-400">
-														{vaultAttachmentKindLabel(attachment.kind)}
-														{#if formatBytes(attachment.sizeBytes)}
-															- {formatBytes(attachment.sizeBytes)}
-														{/if}
-													</p>
-												</div>
-												<a
-													class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300"
-													href={attachment.url}
-													target="_blank"
-													rel="noreferrer"
+											<span
+												class={`rounded-full border px-2.5 py-1 text-[11px] tracking-[0.16em] uppercase ${item.meta.priority === 'p0' ? 'animate-pulse' : ''}`}
+												style={`border-color: ${getPriorityMeta(item.meta.priority).accent}44; background: ${getPriorityMeta(item.meta.priority).accent}18; color: ${getPriorityMeta(item.meta.priority).accent};`}
+											>
+												{getPriorityMeta(item.meta.priority).shortLabel}
+											</span>
+											<span
+												class="rounded-full border border-white/10 px-2 py-1 text-[11px] tracking-[0.16em] text-zinc-300 uppercase"
+											>
+												{getLifeStateMeta(item.meta.lifeState).icon}
+												{getLifeStateMeta(item.meta.lifeState).label}
+											</span>
+											{#if item.meta.pinned}
+												<span
+													class="rounded-full border border-amber-400/20 bg-amber-400/10 px-2 py-1 text-[11px] tracking-[0.16em] text-amber-200 uppercase"
 												>
-													Ouvrir
-												</a>
-											</div>
-
-											{#if isImageAttachment(attachment)}
-												<img
-													class="max-h-72 w-full object-cover"
-													src={attachment.url}
-													alt={attachment.title}
-												/>
-											{:else if isVideoAttachment(attachment)}
-												<!-- svelte-ignore a11y_media_has_caption -->
-												<video
-													class="max-h-72 w-full bg-black"
-													src={attachment.url}
-													controls
-													preload="metadata"
-												></video>
-											{:else if isAudioAttachment(attachment)}
-												<div class="px-4 py-4">
-													<audio class="w-full" src={attachment.url} controls preload="metadata"
-													></audio>
-												</div>
-											{:else}
-												<div class="px-4 py-4">
-													<p class="text-sm break-all text-zinc-300">{attachment.url}</p>
-												</div>
+													Pin
+												</span>
 											{/if}
-										</div>
-									{/each}
-								</div>
-							{/if}
-
-							{#if item.meta.plainTags.length}
-								<div class="mt-4 flex flex-wrap gap-2">
-									{#each item.meta.plainTags as tag}
-										<span
-											class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300"
-										>
-											#{tag}
-										</span>
-									{/each}
-								</div>
-							{/if}
-
-							{#if (relatedNoteMap.get(item.note.id)?.length ?? 0) > 0}
-								<div class="mt-4 rounded-2xl border border-white/8 bg-black/20 p-4">
-									<p class="text-xs tracking-[0.16em] text-zinc-500 uppercase">Liens implicites</p>
-									<div class="mt-3 flex flex-wrap gap-2">
-										{#each relatedNoteMap.get(item.note.id) ?? [] as related}
-											<button
-												class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300"
-												type="button"
-												onclick={() => startEdit(related.note.id)}
+											<span
+												class="rounded-full border border-white/10 px-2 py-1 text-[11px] tracking-[0.16em] text-zinc-400 uppercase"
 											>
-												{related.note.title}
-											</button>
-										{/each}
-									</div>
-								</div>
-							{/if}
+												{getDecayMeta(item.note, item.meta).label}
+											</span>
+										</div>
 
-							<p class="mt-4 text-xs text-zinc-500">
-								Mis a jour le {new Date(item.note.updated_at).toLocaleString('fr-FR')} - {getDecayMeta(
-									item.note,
-									item.meta
-								).daysOld} jour(s)
-							</p>
-						</Card>
+										<div class="flex flex-wrap justify-end gap-2">
+											<button
+												class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300"
+												type="button"
+												onclick={() => copyContent(item.note.id, item.note.content)}
+											>
+												{copyMessage === item.note.id ? 'Copie' : 'Copier'}
+											</button>
+											<button
+												class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300"
+												type="button"
+												onclick={() => startEdit(item.note.id)}
+											>
+												Editer
+											</button>
+											<button
+												class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300"
+												type="button"
+												onclick={() => togglePinned(item.note.id)}
+											>
+												{item.meta.pinned ? 'Unpin' : 'Pin'}
+											</button>
+											<button
+												class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300"
+												type="button"
+												onclick={() => duplicate(item.note.id)}
+											>
+												Dupliquer
+											</button>
+											<button
+												class="rounded-full border border-red-500/20 px-2.5 py-1 text-xs text-red-300"
+												type="button"
+												onclick={() => flowpilot.deleteNote(item.note.id)}
+											>
+												Supprimer
+											</button>
+										</div>
+									</div>
+
+									<h2 class="mt-4 text-xl font-semibold text-white">{item.note.title}</h2>
+
+									{#if item.document.plainText}
+										<div class="mt-4 rounded-2xl border border-white/6 bg-black/25 p-4">
+											<NoteContentRenderer text={item.document.plainText} compact />
+										</div>
+									{:else if !item.document.attachments.length}
+										<p class="mt-4 text-sm text-zinc-500">Contenu vide.</p>
+									{/if}
+
+									{#if item.document.attachments.length}
+										<div class="mt-4 space-y-3">
+											{#each item.document.attachments as attachment}
+												<div class="overflow-hidden rounded-2xl border border-white/8 bg-black/25">
+													<div
+														class="flex items-center justify-between gap-3 border-b border-white/6 px-4 py-3"
+													>
+														<div>
+															<p class="text-sm font-medium text-white">{attachment.title}</p>
+															<p class="mt-1 text-xs text-zinc-400">
+																{vaultAttachmentKindLabel(attachment.kind)}
+																{#if formatBytes(attachment.sizeBytes)}
+																	- {formatBytes(attachment.sizeBytes)}
+																{/if}
+															</p>
+														</div>
+														<a
+															class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300"
+															href={attachment.url}
+															target="_blank"
+															rel="noreferrer"
+														>
+															Ouvrir
+														</a>
+													</div>
+
+													{#if isImageAttachment(attachment)}
+														<img
+															class="max-h-72 w-full object-cover"
+															src={attachment.url}
+															alt={attachment.title}
+														/>
+													{:else if isVideoAttachment(attachment)}
+														<!-- svelte-ignore a11y_media_has_caption -->
+														<video
+															class="max-h-72 w-full bg-black"
+															src={attachment.url}
+															controls
+															preload="metadata"
+														></video>
+													{:else if isAudioAttachment(attachment)}
+														<div class="px-4 py-4">
+															<audio class="w-full" src={attachment.url} controls preload="metadata"
+															></audio>
+														</div>
+													{:else}
+														<div class="px-4 py-4">
+															<p class="text-sm break-all text-zinc-300">{attachment.url}</p>
+														</div>
+													{/if}
+												</div>
+											{/each}
+										</div>
+									{/if}
+
+									{#if item.meta.plainTags.length}
+										<div class="mt-4 flex flex-wrap gap-2">
+											{#each item.meta.plainTags as tag}
+												<span
+													class="rounded-full border border-white/10 px-2.5 py-1 text-xs text-zinc-300"
+												>
+													#{tag}
+												</span>
+											{/each}
+										</div>
+									{/if}
+
+									{#if (relatedNoteMap.get(item.note.id)?.length ?? 0) > 0}
+										<div class="mt-4 rounded-2xl border border-white/8 bg-black/20 p-4">
+											<p class="text-xs tracking-[0.16em] text-zinc-500 uppercase">
+												Liens implicites
+											</p>
+											<div class="mt-3 flex flex-wrap gap-2">
+												{#each relatedNoteMap.get(item.note.id) ?? [] as related}
+													<button
+														class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300"
+														type="button"
+														onclick={() => startEdit(related.note.id)}
+													>
+														{related.note.title}
+													</button>
+												{/each}
+											</div>
+										</div>
+									{/if}
+
+									<p class="mt-4 text-xs text-zinc-500">
+										Mis a jour le {new Date(item.note.updated_at).toLocaleString('fr-FR')} - {getDecayMeta(
+											item.note,
+											item.meta
+										).daysOld} jour(s)
+									</p>
+								</div>
+							</Card>
+						</div>
 					{/each}
 				{:else}
-					<Card class="lg:col-span-2">
+					<Card>
 						<p class="text-lg font-medium text-white">Aucune note pour ce filtre</p>
 						<p class="mt-2 text-sm text-zinc-400">
 							Ajoute une note, une photo commentee, ou assouplis les filtres actifs.

@@ -4,20 +4,13 @@
 	import { page } from '$app/state';
 	import './layout.css';
 	import { onMount } from 'svelte';
+	import { Plus } from 'lucide-svelte';
 	import AccountBadge from '$lib/components/AccountBadge.svelte';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import favicon from '$lib/assets/favicon.svg';
 	import AuthGate from '$lib/components/AuthGate.svelte';
 	import { NAV_ITEMS, SECONDARY_ITEMS } from '$lib/constants';
-	import { getVaultMeta } from '$lib/note-vault';
-	import {
-		authState,
-		flowpilot,
-		notes,
-		notificationCenter,
-		shellState,
-		syncState
-	} from '$lib/flowpilot';
+	import { authState, flowpilot, notificationCenter, shellState, syncState } from '$lib/flowpilot';
 
 	let { children } = $props();
 	type DensityMode = 'compact' | 'cozy' | 'airy';
@@ -97,9 +90,6 @@
 			? 'Accueil'
 			: ([...NAV_ITEMS, ...SECONDARY_ITEMS].find((item) => isActive(item.href))?.label ??
 				page.url.pathname.slice(1));
-	const noteCount = $derived(
-		$notes.filter((note) => !note.deleted_at && getVaultMeta(note).kind === 'note').length
-	);
 </script>
 
 <svelte:head>
@@ -136,12 +126,13 @@
 
 			<nav class="space-y-2">
 				{#each NAV_ITEMS as item}
+					{@const Icon = item.icon}
 					<a
 						class={`flex items-center justify-between rounded-2xl px-4 py-3 text-sm transition ${isActive(item.href) ? 'bg-[#00D4FF]/12 text-white shadow-[0_0_18px_rgba(0,212,255,0.12)]' : 'text-zinc-400 hover:bg-white/4 hover:text-white'}`}
 						href={item.href}
 					>
 						<span>{item.label}</span>
-						<span class="text-xs text-zinc-500">{item.icon}</span>
+						<Icon size={18} strokeWidth={1.8} />
 					</a>
 				{/each}
 			</nav>
@@ -178,59 +169,20 @@
 			<header
 				class="glass-panel sticky top-0 z-30 flex items-center justify-between border-b border-white/6 bg-[#0A0E1A]/86 px-4 py-3 md:px-6"
 			>
-				<div class="flex items-center gap-3">
-					<button
-						class="rounded-2xl border border-white/10 px-3 py-2 text-sm text-zinc-300 lg:hidden"
-						type="button"
-						onclick={() => flowpilot.toggleSecondaryMenu()}
-					>
-						Menu
-					</button>
-					<div>
-						<p class="text-sm font-semibold text-white">{pageLabel()}</p>
-						<p class="text-xs text-zinc-500">
-							{$syncState.running ? 'sync active' : 'offline-first'}
-						</p>
-					</div>
+				<div>
+					<p class="text-sm font-semibold text-white md:text-base">{pageLabel()}</p>
 				</div>
 
-				<div class="flex items-center gap-2">
+				<div class="flex items-center">
 					{#if $authState.user}
 						<a
-							class="rounded-full border border-white/10 bg-[#111] px-2 py-1.5 transition hover:border-white/20"
+							class="transition hover:opacity-90"
 							href="/settings"
 							aria-label="Voir le compte connecte"
 						>
 							<AccountBadge user={$authState.user} compact />
 						</a>
 					{/if}
-					<a
-						class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300"
-						href="/vault"
-					>
-						Notes {noteCount}
-					</a>
-					<button
-						class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300 transition hover:border-white/20 hover:text-white"
-						type="button"
-						onclick={() => (commandPaletteOpen = true)}
-					>
-						Ctrl+K
-					</button>
-					<button
-						class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300 transition hover:border-white/20 hover:text-white"
-						type="button"
-						onclick={cycleDensity}
-					>
-						Densite {densityMode}
-					</button>
-					<button
-						class="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-300 transition hover:border-white/20 hover:text-white"
-						type="button"
-						onclick={() => flowpilot.syncNow()}
-					>
-						Sync
-					</button>
 				</div>
 			</header>
 
@@ -246,16 +198,21 @@
 					style={`grid-template-columns: repeat(${NAV_ITEMS.length}, minmax(0, 1fr));`}
 				>
 					{#each NAV_ITEMS as item}
+						{@const Icon = item.icon}
 						<a
 							class={`flex flex-col items-center gap-1 rounded-2xl px-2 py-2 text-xs ${isActive(item.href) ? 'text-white' : 'text-zinc-500'}`}
 							href={item.href}
 						>
-							<span>{item.icon}</span>
+							<Icon size={18} strokeWidth={1.8} />
 							<span>{item.short}</span>
 						</a>
 					{/each}
 				</div>
 			</nav>
+
+			<a class="fab-note-create" href="/vault?new=1&focus=title" aria-label="Nouvelle note">
+				<Plus size={22} strokeWidth={2.2} />
+			</a>
 
 			{#if $shellState.secondaryMenuOpen}
 				<div class="fixed inset-0 z-40 bg-black/70 lg:hidden">
@@ -284,7 +241,13 @@
 									href={item.href}
 									onclick={() => flowpilot.closeSecondaryMenu()}
 								>
-									{item.label}
+									<span class="flex items-center gap-3">
+										{#if 'icon' in item}
+											{@const Icon = item.icon}
+											<Icon size={18} strokeWidth={1.8} />
+										{/if}
+										<span>{item.label}</span>
+									</span>
 								</a>
 							{/each}
 						</div>

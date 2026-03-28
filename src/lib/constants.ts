@@ -1,4 +1,7 @@
+import { BookOpen, Home, Image as ImageIcon, Network } from 'lucide-svelte';
 import type { TableName, UserSettings } from '$lib/types';
+
+type NavIcon = typeof Home;
 
 export const APP_NAME = 'Nexus Notes';
 
@@ -53,11 +56,16 @@ export const TABLE_USER_FIELD: Record<TableName, 'id' | 'user_id'> = {
 export const SOFT_DELETE_TABLES = new Set<TableName>(['projects', 'tasks', 'notes', 'habits']);
 
 export const NAV_ITEMS = [
-	{ href: '/', label: 'Accueil', short: 'Home', icon: 'H' },
-	{ href: '/vault', label: 'Notes', short: 'Notes', icon: 'N' },
-	{ href: '/media', label: 'Medias', short: 'Media', icon: 'M' },
-	{ href: '/collections', label: 'Constellation', short: 'Graph', icon: 'C' }
-] as const;
+	{ href: '/', label: 'Accueil', short: 'Home', icon: Home },
+	{ href: '/vault', label: 'Notes', short: 'Notes', icon: BookOpen },
+	{ href: '/media', label: 'Medias', short: 'Media', icon: ImageIcon },
+	{ href: '/collections', label: 'Constellation', short: 'Graph', icon: Network }
+] satisfies ReadonlyArray<{
+	href: string;
+	label: string;
+	short: string;
+	icon: NavIcon;
+}>;
 
 export const SECONDARY_ITEMS = [{ href: '/settings', label: 'Parametres' }] as const;
 
