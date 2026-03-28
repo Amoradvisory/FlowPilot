@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Card from '$lib/components/Card.svelte';
+	import ConstellationGraph from '$lib/components/ConstellationGraph.svelte';
 	import { notes } from '$lib/flowpilot';
 	import { buildSmartCollections, type NoteIndexItem } from '$lib/nexus-notes';
 	import {
@@ -16,6 +17,16 @@
 		type VaultDocument
 	} from '$lib/vault-document';
 	import type { Note } from '$lib/types';
+
+	const COLOR_ACCENT: Record<string, string> = {
+		blue: '#00D4FF',
+		pink: '#7B2FFF',
+		green: '#00FF9C',
+		amber: '#FFB800',
+		violet: '#6E63FF',
+		rose: '#FF2D55',
+		slate: '#4A5580'
+	};
 
 	type CollectionNoteItem = NoteIndexItem & {
 		note: Note;
@@ -63,6 +74,14 @@
 	});
 
 	const smartCollections = $derived(buildSmartCollections(noteItems));
+
+	const constellationNoteLinks = $derived(
+		noteItems.map((item) => ({
+			noteId: item.note.id,
+			tags: item.meta.plainTags,
+			color: COLOR_ACCENT[item.meta.color] ?? '#00D4FF'
+		}))
+	);
 
 	const groupedByColor = $derived(
 		NOTE_COLOR_OPTIONS.map((option) => ({
@@ -125,27 +144,16 @@
 			<p class="text-xs tracking-[0.2em] text-zinc-500 uppercase">Tag graph</p>
 			<h2 class="mt-2 text-xl font-semibold text-white">Constellation de tags</h2>
 			<p class="mt-2 text-sm text-zinc-400">
-				Plus un tag revient souvent, plus il prend de place dans la constellation.
+				Hover sur un tag pour illuminer ses notes. Taille = frequence.
 			</p>
 
-			<div
-				class="mt-5 flex min-h-56 flex-wrap items-center justify-center gap-3 rounded-3xl border border-white/8 bg-black/20 p-5"
-			>
-				{#if topTags.length}
-					{#each topTags as item}
-						<span
-							class="rounded-full border border-white/10 px-3 py-2 text-center text-zinc-200"
-							style={`transform: scale(${Math.min(1.38, 1 + item.count * 0.05)}); box-shadow: 0 0 0 1px rgba(255,255,255,0.03), 0 0 20px rgba(0,212,255,${Math.min(0.18, item.count * 0.02)});`}
-						>
-							#{item.tag}
-							<span class="ml-1 text-xs text-zinc-500">{item.count}</span>
-						</span>
-					{/each}
-				{:else}
-					<p class="text-sm text-zinc-500">
-						Ajoute des tags inline comme #projet-x pour faire naitre la constellation.
-					</p>
-				{/if}
+			<div class="mt-5">
+				<ConstellationGraph
+					tags={topTags}
+					noteLinks={constellationNoteLinks}
+					width={480}
+					height={300}
+				/>
 			</div>
 		</Card>
 

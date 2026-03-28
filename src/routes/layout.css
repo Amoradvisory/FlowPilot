@@ -196,3 +196,46 @@ select {
 		column-count: 3;
 	}
 }
+
+/* ── Note decay visual effects ─────────────────────────────────── */
+
+.note-dormant {
+	opacity: 0.62;
+	filter: saturate(0.42);
+	transition:
+		opacity 0.3s,
+		filter 0.3s;
+}
+
+.note-dormant:hover {
+	opacity: 1;
+	filter: saturate(1);
+}
+
+.note-ghost {
+	opacity: 0.32;
+	filter: saturate(0.18) blur(0.4px);
+	transition:
+		opacity 0.3s,
+		filter 0.3s;
+	animation: ghost-breathe 5s ease-in-out infinite;
+}
+
+.note-ghost:hover {
+	opacity: 0.88;
+	filter: saturate(0.7) blur(0px);
+	animation: none;
+}
+
+@keyframes ghost-breathe {
+	0%,
+	100% {
+		opacity: 0.32;
+		filter: saturate(0.18) blur(0.4px);
+	}
+
+	50% {
+		opacity: 0.22;
+		filter: saturate(0.1) blur(0.8px);
+	}
+}

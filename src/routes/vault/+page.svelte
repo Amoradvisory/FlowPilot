@@ -939,7 +939,11 @@
 			<div class="vault-masonry">
 				{#if filteredItems.length}
 					{#each filteredItems as item, index (item.note.id)}
-						<div class="vault-masonry-item" in:fly={{ y: 16, duration: 200, delay: index * 25 }}>
+						{@const decay = getDecayMeta(item.note, item.meta)}
+						<div
+							class={`vault-masonry-item${decay.band === 'ghost' ? ' note-ghost' : decay.band === 'dormant' ? ' note-dormant' : ''}`}
+							in:fly={{ y: 16, duration: 200, delay: index * 25 }}
+						>
 							<Card class={`overflow-hidden ${item.colors.card}`} padding="p-0">
 								<div
 									class="h-12 border-b border-white/8"
