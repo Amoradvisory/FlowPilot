@@ -182,6 +182,26 @@
 		input.value = '';
 	};
 
+	const clearQuickText = () => {
+		quickCaptureText = '';
+		quickPriority = null;
+		quickLifeState = null;
+		setQuickCaptureMessage(null);
+	};
+
+	const archiveNote = async (item: QuickNoteItem) => {
+		await flowpilot.updateNote(item.note.id, {
+			tags: buildVaultTags({
+				kind: 'note',
+				color: item.meta.color,
+				pinned: false,
+				priority: 'p4',
+				lifeState: 'obsolete',
+				plainTags: item.meta.plainTags
+			})
+		});
+	};
+
 	const submitQuickCapture = async () => {
 		if (!quickCaptureText.trim() && !quickCaptureAttachments.length) return;
 
@@ -221,7 +241,7 @@
 						contexte, puis retrouve-la avec le reste de ta journee.
 					</p>
 					<p class="mt-3 text-xs tracking-[0.16em] text-zinc-500 uppercase">
-						Commandes rapides: /todo /meeting /idea /later - tags inline: #projet-x #urgent
+						Commandes rapides: /todo /idea /later - tags inline: #projet-x #urgent
 					</p>
 				</div>
 				<a
@@ -239,7 +259,7 @@
 			></textarea>
 
 			<div class="mt-4 flex flex-wrap gap-2">
-				{#each ['todo', 'meeting', 'idea', 'later'] as command}
+				{#each ['todo', 'idea', 'later'] as command}
 					<button
 						class={`rounded-full border px-3 py-1.5 text-xs transition ${quickPreset.command === command ? 'border-white/25 bg-white/10 text-white' : 'border-white/10 text-zinc-400'}`}
 						type="button"
@@ -325,6 +345,13 @@
 					Sauver la note
 				</button>
 				<button
+					class="rounded-2xl border border-white/10 px-4 py-3 text-sm text-zinc-300"
+					type="button"
+					onclick={clearQuickText}
+				>
+					Effacer
+				</button>
+				<button
 					class="rounded-2xl border border-white/10 px-4 py-3 text-sm text-white"
 					type="button"
 					onclick={openQuickCamera}
@@ -381,13 +408,12 @@
 
 					<div class="mt-4 space-y-3">
 						{#each recentNotes as item}
-							<a
-								class={`block rounded-2xl border px-4 py-3 transition ${
+							<div
+								class={`rounded-2xl border px-4 py-3 ${
 									item.note.id === lastQuickCaptureId
 										? 'border-[#3399FF]/40 bg-[#3399FF]/10 shadow-[0_0_20px_rgba(51,153,255,0.12)]'
 										: item.colors.card
 								}`}
-								href="/vault"
 							>
 								<div class="flex items-start justify-between gap-3">
 									<div class="min-w-0">
@@ -420,7 +446,23 @@
 										</p>
 									</div>
 								</div>
-							</a>
+								<div class="mt-3 flex gap-2">
+									<button
+										class="rounded-xl border border-white/10 px-3 py-1.5 text-xs text-zinc-300 transition hover:border-white/20"
+										type="button"
+										onclick={() => archiveNote(item)}
+									>
+										Archiver
+									</button>
+									<button
+										class="rounded-xl border border-red-500/20 px-3 py-1.5 text-xs text-red-300 transition hover:border-red-500/40"
+										type="button"
+										onclick={() => flowpilot.deleteNote(item.note.id)}
+									>
+										Supprimer
+									</button>
+								</div>
+							</div>
 						{/each}
 					</div>
 				</div>
