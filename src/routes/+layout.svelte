@@ -10,7 +10,7 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import AuthGate from '$lib/components/AuthGate.svelte';
 	import { NAV_ITEMS, SECONDARY_ITEMS } from '$lib/constants';
-	import { authState, flowpilot, notificationCenter, shellState, syncState } from '$lib/flowpilot';
+	import { authState, flowpilot, shellState, syncState } from '$lib/flowpilot';
 
 	let { children } = $props();
 	type DensityMode = 'compact' | 'cozy' | 'airy';
@@ -254,30 +254,6 @@
 					</div>
 				</div>
 			{/if}
-
-			<div
-				class="pointer-events-none fixed top-20 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-3"
-			>
-				{#each $notificationCenter.filter((item) => !item.dismissed).slice(0, 3) as item}
-					<div
-						class="pointer-events-auto rounded-3xl border border-white/10 bg-[#111]/96 p-4 shadow-lg"
-					>
-						<div class="flex items-start justify-between gap-3">
-							<div>
-								<p class="text-sm font-medium text-white">{item.title}</p>
-								<p class="mt-1 text-sm text-zinc-400">{item.body}</p>
-							</div>
-							<button
-								class="rounded-full border border-white/10 px-2 py-1 text-xs text-zinc-400"
-								type="button"
-								onclick={() => flowpilot.dismissNotification(item.id)}
-							>
-								x
-							</button>
-						</div>
-					</div>
-				{/each}
-			</div>
 
 			<CommandPalette open={commandPaletteOpen} onClose={() => (commandPaletteOpen = false)} />
 		</div>
