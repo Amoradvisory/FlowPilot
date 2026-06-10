@@ -1,36 +1,41 @@
 # FlowPilot
 
-![GitHub](https://img.shields.io/github/license/Amoradvisory/FlowPilot)
-![GitHub last commit](https://img.shields.io/github/last-commit/Amoradvisory/FlowPilot)
-![GitHub issues](https://img.shields.io/github/issues/Amoradvisory/FlowPilot)
+![Licence](https://img.shields.io/github/license/Amoradvisory/FlowPilot)
+![Dernier commit](https://img.shields.io/github/last-commit/Amoradvisory/FlowPilot)
 
 ## Description
 
-FlowPilot est un cockpit de productivité personnel local-first pour piloter une flotte d'agents Hermes sans modifier le cœur Hermes.
+FlowPilot est une application web de productivité personnelle **local-first** (PWA installable), construite avec SvelteKit. Les données restent sur l'appareil ; l'application fonctionne hors-ligne grâce à un service worker.
 
-## Fonctionnalités
+## Fonctionnalités (modules présents dans le code)
 
-- Interface utilisateur intuitive
-- Gestion d'agents Hermes
-- Fonctionnement local-first
-- Tableau de bord personnalisable
+- **Agenda** — organisation des journées
+- **Focus** — sessions de concentration
+- **Habitudes** — suivi d'habitudes
+- **Collections** — listes et regroupements personnels
+- **Analytics** — statistiques d'usage personnelles
+- **Clarify** — clarification des tâches entrantes
 
-## Installation
+## Stack technique
+
+- [SvelteKit 2](https://kit.svelte.dev/) + Svelte 5 (adapter-static)
+- [Tailwind CSS 4](https://tailwindcss.com/)
+- TypeScript · Vite · PWA (service worker)
+
+## Installation et lancement
 
 ```bash
-# Clone le dépôt
 git clone https://github.com/Amoradvisory/FlowPilot.git
-
-# Accède au répertoire
 cd FlowPilot
-
-# Installe les dépendances
-npm install
-
-# Lance l'application
-npm run dev
+npm ci
+npm run dev      # développement
+npm run build    # build de production
 ```
+
+## Statut du projet
+
+Prototype personnel actif — développé comme cockpit de productivité individuel.
 
 ## Licence
 
-Ce projet est sous licence MIT - voir le fichier [LICENSE](LICENSE) pour plus de détails.
+Projet sous licence MIT — voir [LICENSE](LICENSE).
