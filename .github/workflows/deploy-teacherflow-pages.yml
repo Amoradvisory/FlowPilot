@@ -42,8 +42,11 @@ jobs:
           BASE_PATH: /FlowPilot
         run: npm run build
 
-      - name: Add the single-page-app fallback
-        run: cp build/index.html build/404.html
+      - name: Add the public TeacherFlow entry point and SPA fallback
+        run: |
+          mkdir -p build/teacher
+          cp build/index.html build/teacher/index.html
+          cp build/index.html build/404.html
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

@@ -2,7 +2,7 @@
 
 > Transformer un retour de cours de trente secondes en prochaine amélioration explicite, sans collecter de données élèves et sans confier le jugement pédagogique à une machine.
 
-- **Démonstration :** [amoradvisory.github.io/FlowPilot/teacher](https://amoradvisory.github.io/FlowPilot/teacher)
+- **Démonstration :** [amoradvisory.github.io/FlowPilot/teacher/](https://amoradvisory.github.io/FlowPilot/teacher/)
 - **Implémentation :** branche `teacherflow-demo`, [pull request #1](https://github.com/Amoradvisory/FlowPilot/pull/1)
 - **Statut :** prototype public fonctionnel — pas un déploiement institutionnel
 

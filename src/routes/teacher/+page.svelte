@@ -215,7 +215,7 @@
 		property="og:description"
 		content="Une preuve interactive, locale et sans données élèves, conçue pour rendre visible la boucle d’amélioration du travail enseignant."
 	/>
-	<link rel="canonical" href="https://amoradvisory.github.io/FlowPilot/teacher" />
+	<link rel="canonical" href="https://amoradvisory.github.io/FlowPilot/teacher/" />
 </svelte:head>
 
 <div class="teacherflow-shell min-h-screen overflow-hidden bg-[#f6f2e8] text-[#13233f]">
