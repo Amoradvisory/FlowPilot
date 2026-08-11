@@ -17,6 +17,7 @@
 
 	let commandPaletteOpen = $state(false);
 	let densityMode = $state<DensityMode>('cozy');
+	const isTeacherFlow = $derived(page.url.pathname.startsWith('/teacher'));
 
 	const applyDensityMode = (mode: DensityMode) => {
 		densityMode = mode;
@@ -32,6 +33,8 @@
 	};
 
 	onMount(() => {
+		if (page.url.pathname.startsWith('/teacher')) return;
+
 		if (browser) {
 			const storedDensity = localStorage.getItem('nexus-density');
 			if (storedDensity === 'compact' || storedDensity === 'cozy' || storedDensity === 'airy') {
@@ -94,11 +97,15 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
-	<link rel="manifest" href="/manifest.json" />
+	{#if !isTeacherFlow}
+		<link rel="manifest" href="/manifest.json" />
+	{/if}
 	<meta name="theme-color" content="#0A0E1A" />
 </svelte:head>
 
-{#if !$authState.ready}
+{#if isTeacherFlow}
+	{@render children()}
+{:else if !$authState.ready}
 	<div class="flex min-h-screen items-center justify-center text-sm text-zinc-400">
 		Initialisation de Nexus Notes...
 	</div>

@@ -1,6 +1,8 @@
 import adapter from '@sveltejs/adapter-static';
 import { relative, sep } from 'node:path';
 
+const base = process.env.BASE_PATH ?? '';
+
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
 	compilerOptions: {
@@ -18,7 +20,10 @@ const config = {
 		// local builds reliable on Windows and still deploys cleanly on Vercel.
 		adapter: adapter({
 			fallback: 'index.html'
-		})
+		}),
+		paths: {
+			base
+		}
 	}
 };
 
