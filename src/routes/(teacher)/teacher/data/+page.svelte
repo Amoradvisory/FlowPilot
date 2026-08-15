@@ -67,8 +67,7 @@
 
 	async function restoreImport() {
 		if (!preview) return;
-		await teacherFlow.replacePersonal(preview);
-		preview = undefined;
+		if (await teacherFlow.replacePersonal(preview)) preview = undefined;
 	}
 </script>
 
@@ -96,8 +95,31 @@
 					>Utiliser mon espace personnel</button
 				>
 			</div>
+			{#if teacherFlow.lastExportedAt}
+				<p>
+					Dernier export : {new Date(teacherFlow.lastExportedAt).toLocaleString('fr-FR')}. {teacherFlow.snapshot.courses.some(
+						(course) => course.updatedAt > teacherFlow.lastExportedAt!
+					) ||
+					teacherFlow.snapshot.sessions.some(
+						(session) => session.updatedAt > teacherFlow.lastExportedAt!
+					) ||
+					teacherFlow.snapshot.observations.some(
+						(observation) => observation.updatedAt > teacherFlow.lastExportedAt!
+					) ||
+					teacherFlow.snapshot.decisions.some(
+						(decision) => decision.updatedAt > teacherFlow.lastExportedAt!
+					)
+						? 'Des modifications existent depuis cet export.'
+						: 'Aucune modification depuis cet export.'}
+				</p>
+			{:else}<p>Aucun export enregistré sur cet appareil.</p>{/if}
 		</section>
 	{:else}
+		<p class="quiet-note">
+			{teacherFlow.lastExportedAt
+				? `Dernier export : ${new Date(teacherFlow.lastExportedAt).toLocaleString('fr-FR')}. ${teacherFlow.snapshot.courses.some((course) => course.updatedAt > teacherFlow.lastExportedAt!) || teacherFlow.snapshot.sessions.some((session) => session.updatedAt > teacherFlow.lastExportedAt!) || teacherFlow.snapshot.observations.some((observation) => observation.updatedAt > teacherFlow.lastExportedAt!) || teacherFlow.snapshot.decisions.some((decision) => decision.updatedAt > teacherFlow.lastExportedAt!) ? 'Des modifications existent depuis cet export.' : 'Aucune modification depuis cet export.'}`
+				: 'Aucun export enregistré sur cet appareil.'}
+		</p>
 		<section class="management-section">
 			<h2>Sauvegarder votre espace personnel</h2>
 			<p>

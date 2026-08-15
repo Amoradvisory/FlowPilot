@@ -20,10 +20,21 @@
 	let busy = $state(false);
 	const entries = $derived(teacherFlow.memory(filters));
 	const groups = $derived.by(() => {
-		const indexed = new Map<string, { course: string; session: string; entries: typeof entries }>();
+		const indexed = new Map<
+			string,
+			{
+				courseId: string;
+				sessionId: string;
+				course: string;
+				session: string;
+				entries: Array<(typeof entries)[number]>;
+			}
+		>();
 		for (const entry of entries) {
 			const key = `${entry.course.id}:${entry.session.id}`;
 			const group = indexed.get(key) ?? {
+				courseId: entry.course.id,
+				sessionId: entry.session.id,
 				course: entry.course.name,
 				session: entry.session.title,
 				entries: []
@@ -106,7 +117,7 @@
 			aria-label="Chronologie pédagogique"
 			tabindex="-1"
 		>
-			{#each groups as group (`${group.course}:${group.session}`)}
+			{#each groups as group (`${group.courseId}:${group.sessionId}`)}
 				<section class="memory-group" aria-label={`${group.course} — ${group.session}`}>
 					<h2>{group.course}</h2>
 					<h3>{group.session}</h3>

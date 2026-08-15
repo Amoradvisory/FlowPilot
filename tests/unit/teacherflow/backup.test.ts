@@ -72,6 +72,14 @@ describe('TeacherFlow personal backup', () => {
 		expect(parseTeacherFlowBackup(JSON.stringify(backup))).toEqual({ ok: true, value: backup });
 	});
 
+	it('rejects a non-canonical application version', () => {
+		expect(() => exportWorkspace(personalSnapshot(), ' 1.2.3 ')).toThrow();
+		const backup = exportWorkspace(personalSnapshot(), '1.2.3');
+		expect(
+			parseTeacherFlowBackup(JSON.stringify({ ...backup, appVersion: ' 1.2.3 ' }))
+		).toMatchObject({ ok: false });
+	});
+
 	it('rejects non-personal export, malformed JSON, oversized UTF-8 input and invalid domain content', () => {
 		expect(() => exportWorkspace({ ...personalSnapshot(), workspaceId: 'demo' }, '1')).toThrow();
 		expect(parseTeacherFlowBackup('{')).toMatchObject({ ok: false });

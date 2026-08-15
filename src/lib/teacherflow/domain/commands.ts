@@ -39,6 +39,13 @@ function timestamp(clock: Clock): string {
 	return isoUtc(clock(), 'now');
 }
 
+function strictlyAfter(previous: string, clock: Clock): string {
+	const now = timestamp(clock);
+	return new Date(
+		Math.max(Date.parse(now), Date.parse(isoUtc(previous, 'updatedAt')) + 1)
+	).toISOString();
+}
+
 export function createCourse(
 	draft: CourseDraft,
 	clock: Clock = systemClock,
@@ -180,7 +187,7 @@ export function updateObservation(
 			'workspaceId'
 		);
 	}
-	const now = timestamp(clock);
+	const now = strictlyAfter(observation.updatedAt, clock);
 	if (Date.parse(now) < Date.parse(isoUtc(observation.updatedAt, 'updatedAt'))) {
 		throw new DomainError('invalid_date_order', 'now cannot precede updatedAt', 'now');
 	}
@@ -233,7 +240,7 @@ export function updateDecisionStatus(
 		);
 	}
 
-	const now = timestamp(clock);
+	const now = strictlyAfter(decision.updatedAt, clock);
 	if (Date.parse(now) < Date.parse(isoUtc(decision.updatedAt, 'updatedAt'))) {
 		throw new DomainError('invalid_date_order', 'now cannot precede updatedAt', 'now');
 	}
@@ -252,7 +259,7 @@ export function updateDecisionText(
 	clock: Clock = systemClock
 ): Decision {
 	validateDecision(decision);
-	const now = timestamp(clock);
+	const now = strictlyAfter(decision.updatedAt, clock);
 	if (Date.parse(now) < Date.parse(isoUtc(decision.updatedAt, 'updatedAt'))) {
 		throw new DomainError('invalid_date_order', 'now cannot precede updatedAt', 'now');
 	}

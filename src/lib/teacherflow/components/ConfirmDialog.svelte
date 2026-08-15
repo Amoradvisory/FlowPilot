@@ -32,9 +32,12 @@
 		if (open && !dialog.open) dialog.showModal();
 		if (!open && dialog.open) dialog.close();
 	});
+	$effect(() => {
+		if (!open) confirmation = '';
+	});
 
 	function cancel() {
-		oncancel();
+		if (!busy) oncancel();
 	}
 	function close() {
 		returnFocus?.focus();

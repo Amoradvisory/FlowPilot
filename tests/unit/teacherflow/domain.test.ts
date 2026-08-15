@@ -8,6 +8,7 @@ import {
 	planCourseDeletion,
 	planObservationDeletion,
 	updateCourse,
+	updateObservation,
 	updateDecisionStatus,
 	updateSession
 } from '../../../src/lib/teacherflow/domain/commands';
@@ -793,6 +794,23 @@ describe('TeacherFlow relationship invariants and deletion intents', () => {
 			'relation_not_found',
 			'courseId'
 		);
+	});
+});
+
+describe('TeacherFlow monotonic editing', () => {
+	it('moves an observation timestamp forward when the clock has not advanced', () => {
+		const observation = makeSnapshot().observations[0]!;
+		const updated = updateObservation(
+			observation,
+			{
+				workspaceId: observation.workspaceId,
+				sessionId: observation.sessionId,
+				signal: observation.signal,
+				note: observation.note
+			},
+			() => new Date(observation.updatedAt)
+		);
+		expect(updated.updatedAt).toBe('2026-08-15T07:00:00.001Z');
 	});
 });
 

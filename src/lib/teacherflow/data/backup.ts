@@ -190,7 +190,9 @@ export function exportWorkspace(
 		);
 	}
 	validateWorkspaceSnapshot(snapshot);
-	if (!appVersion.trim()) throw new DomainError('required', 'appVersion is required', 'appVersion');
+	if (!appVersion.trim() || appVersion !== appVersion.trim()) {
+		throw new DomainError('non_canonical', 'appVersion must be canonical', 'appVersion');
+	}
 	return {
 		format: TEACHERFLOW_BACKUP_FORMAT,
 		formatVersion: TEACHERFLOW_BACKUP_VERSION,
@@ -227,6 +229,9 @@ export function parseTeacherFlowBackup(input: string): ParseResult<TeacherFlowBa
 	const shapeError = validShape(parsed);
 	if (shapeError) return { ok: false, reason: shapeError.code, error: shapeError };
 	try {
+		if (parsed.appVersion !== (parsed.appVersion as string).trim()) {
+			return failure('invalid_domain', 'La version de l’application doit être canonique.');
+		}
 		const exportedAt = new Date(parsed.exportedAt as string);
 		if (Number.isNaN(exportedAt.getTime()) || exportedAt.toISOString() !== parsed.exportedAt) {
 			return failure('invalid_domain', 'La date d’export doit être une date UTC ISO valide.');

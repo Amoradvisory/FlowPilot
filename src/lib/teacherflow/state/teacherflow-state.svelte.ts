@@ -74,7 +74,7 @@ export interface TeacherFlowState {
 	deleteCourse(courseId: string): Promise<void>;
 	resetDemo(): Promise<void>;
 	resetPersonal(): Promise<void>;
-	replacePersonal(snapshot: WorkspaceSnapshot): Promise<void>;
+	replacePersonal(snapshot: WorkspaceSnapshot): Promise<boolean>;
 	markPersonalExportedAt(exportedAt: string): Promise<boolean>;
 }
 
@@ -305,7 +305,8 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 				activationIsCurrent(epoch, nextWorkspaceId) &&
 				nextWorkspaceId === PERSONAL_WORKSPACE_ID
 			) {
-				write('lastExportedAt', await nextRepository.lastPersonalExportedAt());
+				const lastExportedAt = await nextRepository.lastPersonalExportedAt();
+				if (activationIsCurrent(epoch, nextWorkspaceId)) write('lastExportedAt', lastExportedAt);
 			}
 		} catch (error) {
 			if (!activationIsCurrent(epoch, nextWorkspaceId)) return;
@@ -410,7 +411,7 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 			return enqueueMutation(undefined, async (context) => {
 				if (
 					current.workspaceId !== context.workspaceId ||
-					decision?.workspaceId !== context.workspaceId
+					(decision !== undefined && decision.workspaceId !== context.workspaceId)
 				) {
 					throw new DomainError(
 						'workspace_mismatch',
@@ -482,8 +483,8 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 			await enqueueMutation(undefined, (context) => context.repository.clearWorkspace());
 		},
 		async replacePersonal(nextSnapshot) {
-			if (read<TeacherFlowWorkspaceId>('workspaceId') !== PERSONAL_WORKSPACE_ID) return;
-			await enqueueMutation(undefined, (context) =>
+			if (read<TeacherFlowWorkspaceId>('workspaceId') !== PERSONAL_WORKSPACE_ID) return false;
+			return enqueueMutation(undefined, (context) =>
 				context.repository.importPersonalWorkspace(nextSnapshot, TEACHERFLOW_APP_VERSION)
 			);
 		},
