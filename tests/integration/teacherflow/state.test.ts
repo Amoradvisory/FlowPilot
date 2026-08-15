@@ -401,6 +401,66 @@ describe('TeacherFlow state controller', () => {
 		expect(state.phase).toBe('ready');
 	});
 
+	it('closes the microtask window between a stable load check and activation publication', async () => {
+		const oldCommit = deferred<void>();
+		const oldStarted = deferred<void>();
+		const activationLoadStarted = deferred<void>();
+		const activationLoad = deferred<WorkspaceSnapshot>();
+		let shared = empty(PERSONAL_WORKSPACE_ID);
+		let pendingObservation: WorkspaceSnapshot['observations'][number] | undefined;
+		const oldPersonal = repository(PERSONAL_WORKSPACE_ID);
+		oldPersonal.load = async () => shared;
+		oldPersonal.putObservationWithDecision = (observation) => {
+			pendingObservation = observation;
+			oldStarted.resolve();
+			return oldCommit.promise;
+		};
+		activationLoad.promise.then(() => {
+			shared = {
+				...shared,
+				observations: [...shared.observations, pendingObservation!]
+			};
+			oldCommit.resolve();
+		});
+		const currentPersonal = repository(PERSONAL_WORKSPACE_ID);
+		let activationLoads = 0;
+		currentPersonal.load = () => {
+			activationLoads += 1;
+			if (activationLoads > 1) return Promise.resolve(shared);
+			activationLoadStarted.resolve();
+			return activationLoad.promise;
+		};
+		const demo = repository(DEMO_WORKSPACE_ID);
+		let personalOpenCount = 0;
+		const state = createTeacherFlowState({
+			repositoryFactory: async (workspaceId) => {
+				if (workspaceId === DEMO_WORKSPACE_ID) return demo;
+				personalOpenCount += 1;
+				return personalOpenCount === 1 ? oldPersonal : currentPersonal;
+			},
+			clock
+		});
+		await state.switchWorkspace(PERSONAL_WORKSPACE_ID);
+		const oldSave = state.saveObservationFlow(
+			observationDraft('Commit dans la couture microtask.')
+		);
+		await oldStarted.promise;
+		await state.switchWorkspace(DEMO_WORKSPACE_ID);
+
+		const reactivation = state.switchWorkspace(PERSONAL_WORKSPACE_ID);
+		await activationLoadStarted.promise;
+		activationLoad.resolve(shared);
+		await Promise.all([oldSave, reactivation]);
+
+		expect(activationLoads).toBe(2);
+		expect(state.snapshot.observations.map(({ note }) => note)).toEqual([
+			'Commit dans la couture microtask.'
+		]);
+		expect(state.status).toBeUndefined();
+		expect(state.draft).toBeUndefined();
+		expect(state.phase).toBe('ready');
+	});
+
 	it('serializes concurrent saves and only announces the current mutation after its reload', async () => {
 		const firstWrite = deferred<void>();
 		const secondWrite = deferred<void>();

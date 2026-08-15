@@ -156,19 +156,22 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 		state.published = Math.max(state.published, revision);
 	}
 
-	async function loadStableSnapshot(
+	async function loadAndPublishStable(
 		workspaceId: TeacherFlowWorkspaceId,
 		activeRepository: TeacherFlowRepository,
-		isRelevant: () => boolean
-	): Promise<{ snapshot: WorkspaceSnapshot; revision: number } | undefined> {
+		isRelevant: () => boolean,
+		publish: (snapshot: WorkspaceSnapshot, revision: number) => void
+	): Promise<boolean> {
 		for (let attempt = 0; attempt < MAX_STABLE_LOAD_ATTEMPTS; attempt += 1) {
 			const revisionBeforeLoad = revisionState(workspaceId).committed;
 			const snapshot = await activeRepository.load();
-			if (!isRelevant()) return undefined;
+			if (!isRelevant()) return false;
 			const revisionAfterLoad = revisionState(workspaceId).committed;
-			if (revisionBeforeLoad === revisionAfterLoad) {
-				return { snapshot, revision: revisionAfterLoad };
-			}
+			if (revisionBeforeLoad !== revisionAfterLoad) continue;
+			if (!isRelevant()) return false;
+			if (revisionState(workspaceId).committed !== revisionAfterLoad) continue;
+			publish(snapshot, revisionAfterLoad);
+			return true;
 		}
 		throw new Error('TeacherFlow data did not reach a stable revision while loading');
 	}
@@ -185,10 +188,15 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 			workspaceEpoch === activeEpoch &&
 			read<TeacherFlowWorkspaceId>('workspaceId') === workspaceId &&
 			repository === activeRepository;
-		const loaded = await loadStableSnapshot(workspaceId, activeRepository, remainsActive);
-		if (!loaded || !remainsActive()) return;
-		write('snapshot', loaded.snapshot);
-		markWorkspacePublished(workspaceId, loaded.revision);
+		await loadAndPublishStable(
+			workspaceId,
+			activeRepository,
+			remainsActive,
+			(snapshot, stableRevision) => {
+				write('snapshot', snapshot);
+				markWorkspacePublished(workspaceId, stableRevision);
+			}
+		);
 	}
 
 	function isDraftFromActiveWorkspace(draft: ObservationFlowDraft): boolean {
@@ -260,14 +268,17 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 				await nextRepository.ensureDemoSeed(createDemoSeed(options.clock));
 				if (!activationIsCurrent(epoch, nextWorkspaceId)) return;
 			}
-			const loaded = await loadStableSnapshot(nextWorkspaceId, nextRepository, () =>
-				activationIsCurrent(epoch, nextWorkspaceId)
+			await loadAndPublishStable(
+				nextWorkspaceId,
+				nextRepository,
+				() => activationIsCurrent(epoch, nextWorkspaceId),
+				(snapshot, stableRevision) => {
+					repository = nextRepository;
+					write('snapshot', snapshot);
+					markWorkspacePublished(nextWorkspaceId, stableRevision);
+					write('phase', isOnline() ? 'ready' : 'degraded');
+				}
 			);
-			if (!loaded || !activationIsCurrent(epoch, nextWorkspaceId)) return;
-			repository = nextRepository;
-			write('snapshot', loaded.snapshot);
-			markWorkspacePublished(nextWorkspaceId, loaded.revision);
-			write('phase', isOnline() ? 'ready' : 'degraded');
 		} catch (error) {
 			if (!activationIsCurrent(epoch, nextWorkspaceId)) return;
 			write('phase', 'error' satisfies TeacherFlowPhase);
