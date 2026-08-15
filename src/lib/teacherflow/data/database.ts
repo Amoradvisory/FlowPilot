@@ -1,4 +1,4 @@
-import Dexie, { type EntityTable } from 'dexie';
+import Dexie, { type Table } from 'dexie';
 import type { Course, Decision, Observation, Session, WorkspaceId } from '../domain/types';
 
 export interface MetaRecord {
@@ -19,12 +19,12 @@ export interface RecoveryBackup {
 
 /** A narrow Dexie adapter. Repositories own all reads/writes and UI never receives tables. */
 export class TeacherFlowDatabase extends Dexie {
-	courses!: EntityTable<Course, [string, string]>;
-	sessions!: EntityTable<Session, [string, string]>;
-	observations!: EntityTable<Observation, [string, string]>;
-	decisions!: EntityTable<Decision, [string, string]>;
-	meta!: EntityTable<MetaRecord, [string, string]>;
-	recoveryBackups!: EntityTable<RecoveryBackup, number>;
+	courses!: Table<Course, [string, string]>;
+	sessions!: Table<Session, [string, string]>;
+	observations!: Table<Observation, [string, string]>;
+	decisions!: Table<Decision, [string, string]>;
+	meta!: Table<MetaRecord, [string, string]>;
+	recoveryBackups!: Table<RecoveryBackup, number>;
 
 	constructor(name = 'teacherflow', indexedDB?: IDBFactory, idbKeyRange?: typeof IDBKeyRange) {
 		super(name, indexedDB && idbKeyRange ? { indexedDB, IDBKeyRange: idbKeyRange } : undefined);

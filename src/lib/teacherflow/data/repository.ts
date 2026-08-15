@@ -183,12 +183,14 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 		try {
 			await this.database.transaction(
 				'rw',
-				this.database.courses,
-				this.database.sessions,
-				this.database.observations,
-				this.database.decisions,
-				this.database.meta,
-				this.database.recoveryBackups,
+				[
+					this.database.courses,
+					this.database.sessions,
+					this.database.observations,
+					this.database.decisions,
+					this.database.meta,
+					this.database.recoveryBackups
+				],
 				async () => operation(await this.read())
 			);
 		} catch (error) {
