@@ -12,6 +12,7 @@ import type {
 import { TeacherFlowDatabase } from './database';
 import { InvalidStoredData, mapStorageError } from './errors';
 import {
+	LEGACY_SOURCES,
 	migrateLegacyLocalStorage,
 	type LegacyMigrationOptions,
 	type MigrationResult,
@@ -33,23 +34,15 @@ export interface TeacherFlowRepository {
 }
 
 export interface OpenTeacherFlowRepositoryOptions {
-	/** Inject a database in tests or when an SSR host owns its lifecycle. */
-	database?: TeacherFlowDatabase;
 	databaseName?: string;
+	/** Optional platform port for SSR/tests; Dexie itself never crosses this API. */
+	indexedDB?: IDBFactory | null;
 	/** Inject localStorage; SSR can omit it safely. */
 	storage?: StorageAdapter;
 	migrateLegacy?: boolean;
 	now?: () => Date;
-	migrationBeforeCommit?: LegacyMigrationOptions['beforeCommit'];
+	migrationAfterFirstWrite?: LegacyMigrationOptions['afterFirstWrite'];
 }
-
-const empty = (workspaceId: WorkspaceId): WorkspaceSnapshot => ({
-	workspaceId,
-	courses: [],
-	sessions: [],
-	observations: [],
-	decisions: []
-});
 
 function ordered<T extends { id: string }>(values: T[]): T[] {
 	return values.sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
@@ -156,7 +149,18 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 	}
 
 	async clearWorkspace(): Promise<void> {
-		await this.write(async () => this.removeWorkspace());
+		await this.write(async () => {
+			await this.removeWorkspace();
+			await this.database.recoveryBackups.where('workspaceId').equals(this.workspaceId).delete();
+			for (const source of LEGACY_SOURCES) {
+				await this.database.meta.put({
+					workspaceId: this.workspaceId,
+					key: source.migrationId,
+					value: { status: 'reset' },
+					updatedAt: new Date().toISOString()
+				});
+			}
+		});
 	}
 
 	private async replaceEntity(
@@ -179,6 +183,8 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 				this.database.sessions,
 				this.database.observations,
 				this.database.decisions,
+				this.database.meta,
+				this.database.recoveryBackups,
 				async () => operation(await this.read())
 			);
 		} catch (error) {
@@ -231,8 +237,12 @@ export async function openTeacherFlowRepository(
 	workspaceId: WorkspaceId,
 	options: OpenTeacherFlowRepositoryOptions = {}
 ): Promise<TeacherFlowRepository> {
-	const database = options.database ?? new TeacherFlowDatabase(options.databaseName);
 	try {
+		const indexedDB =
+			options.indexedDB === null ? undefined : (options.indexedDB ?? globalThis.indexedDB);
+		if (!indexedDB)
+			throw Object.assign(new Error('IndexedDB unavailable'), { name: 'MissingAPIError' });
+		const database = new TeacherFlowDatabase(options.databaseName, indexedDB);
 		await database.open();
 		const canMigrate =
 			(options.migrateLegacy !== false &&
@@ -247,7 +257,7 @@ export async function openTeacherFlowRepository(
 					workspaceId,
 					storage: options.storage,
 					now: options.now,
-					beforeCommit: options.migrationBeforeCommit
+					afterFirstWrite: options.migrationAfterFirstWrite
 				})
 			: { recovered: 0, ignored: 0, backupCreated: false, alreadyApplied: false };
 		return new DexieTeacherFlowRepository(workspaceId, database, migration);

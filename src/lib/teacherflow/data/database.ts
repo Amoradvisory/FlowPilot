@@ -9,7 +9,6 @@ export interface MetaRecord {
 }
 
 export interface RecoveryBackup {
-	id?: number;
 	workspaceId: WorkspaceId;
 	migrationId: string;
 	raw: string;
@@ -24,10 +23,10 @@ export class TeacherFlowDatabase extends Dexie {
 	observations!: EntityTable<Observation, [string, string]>;
 	decisions!: EntityTable<Decision, [string, string]>;
 	meta!: EntityTable<MetaRecord, [string, string]>;
-	recoveryBackups!: EntityTable<RecoveryBackup, number>;
+	recoveryBackups!: EntityTable<RecoveryBackup, [string, string]>;
 
-	constructor(name = 'teacherflow') {
-		super(name);
+	constructor(name = 'teacherflow', indexedDB?: IDBFactory) {
+		super(name, indexedDB ? { indexedDB, IDBKeyRange: globalThis.IDBKeyRange } : undefined);
 		this.version(1).stores({
 			courses: '[workspaceId+id], workspaceId, id, [workspaceId+updatedAt]',
 			sessions:
@@ -37,7 +36,18 @@ export class TeacherFlowDatabase extends Dexie {
 			decisions:
 				'[workspaceId+id], workspaceId, id, [workspaceId+observationId], [workspaceId+targetSessionId], [workspaceId+status], [workspaceId+updatedAt]',
 			meta: '[workspaceId+key], workspaceId, key',
-			recoveryBackups: '++id, workspaceId, migrationId, [workspaceId+migrationId], createdAt'
+			recoveryBackups: '[workspaceId+migrationId], workspaceId, migrationId, createdAt'
+		});
+		this.version(2).stores({
+			courses: '[workspaceId+id], workspaceId, id, [workspaceId+updatedAt]',
+			sessions:
+				'[workspaceId+id], workspaceId, id, [workspaceId+courseId], [workspaceId+scheduledFor], [workspaceId+updatedAt]',
+			observations:
+				'[workspaceId+id], workspaceId, id, [workspaceId+sessionId], [workspaceId+createdAt], [workspaceId+updatedAt]',
+			decisions:
+				'[workspaceId+id], workspaceId, id, [workspaceId+observationId], [workspaceId+targetSessionId], [workspaceId+status], [workspaceId+updatedAt]',
+			meta: '[workspaceId+key], workspaceId, key',
+			recoveryBackups: '[workspaceId+migrationId], workspaceId, migrationId, createdAt'
 		});
 	}
 }

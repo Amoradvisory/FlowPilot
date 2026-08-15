@@ -54,7 +54,12 @@ export function mapStorageError(error: unknown): Error {
 	if (error instanceof TeacherFlowStorageError) return error;
 	const name = error instanceof Error ? error.name : '';
 	if (name === 'QuotaExceededError') return new StorageFull(error);
-	if (name === 'SecurityError' || name === 'InvalidStateError' || name === 'NotAllowedError') {
+	if (
+		name === 'SecurityError' ||
+		name === 'InvalidStateError' ||
+		name === 'NotAllowedError' ||
+		name === 'MissingAPIError'
+	) {
 		return new StorageUnavailable(error);
 	}
 	if (name === 'DataError' || name === 'ConstraintError' || name === 'SyntaxError') {

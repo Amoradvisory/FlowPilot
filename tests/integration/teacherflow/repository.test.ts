@@ -130,4 +130,96 @@ describe('TeacherFlowRepository', () => {
 		});
 		expect(await repo.load()).toEqual(before);
 	});
+
+	it('replaces a coherent workspace atomically', async () => {
+		const repo = await openTeacherFlowRepository('personal', {
+			databaseName: databaseName(),
+			migrateLegacy: false
+		});
+		const nextCourse = { ...course(), id: 'replacement-course', name: 'Physique' };
+		await repo.replaceWorkspace({
+			workspaceId: 'personal',
+			courses: [nextCourse],
+			sessions: [],
+			observations: [],
+			decisions: []
+		});
+		expect(await repo.load()).toEqual({
+			workspaceId: 'personal',
+			courses: [nextCourse],
+			sessions: [],
+			observations: [],
+			decisions: []
+		});
+	});
+
+	it('clears observations with their decisions, preserves external decisions by clearing their target, and reset prevents legacy reimport', async () => {
+		const name = databaseName();
+		const storage = {
+			getItem: (key: string) =>
+				key === 'teacherflow-public-demo-observations-v1'
+					? JSON.stringify([
+							{ id: 'legacy', signal: 'worked', note: 'Ancienne note', capturedAt: now }
+						])
+					: null
+		};
+		const repo = await openTeacherFlowRepository('personal', {
+			databaseName: name,
+			storage,
+			migrateLegacy: false
+		});
+		const sourceSession = { ...session(), scheduledFor: '2026-08-16T09:00:00.000Z' };
+		const secondCourse = { ...course(), id: 'course-two', name: 'Sciences' };
+		const target = {
+			...session(),
+			id: 'target',
+			courseId: secondCourse.id,
+			scheduledFor: '2026-08-16T09:00:00.000Z'
+		};
+		const externalObservation = {
+			...observation(),
+			id: 'external-observation',
+			sessionId: target.id
+		};
+		const externalDecision = {
+			...decision(),
+			id: 'external-decision',
+			observationId: externalObservation.id,
+			targetSessionId: 'session'
+		};
+		await repo.replaceWorkspace({
+			workspaceId: 'personal',
+			courses: [course(), secondCourse],
+			sessions: [sourceSession, target],
+			observations: [observation(), externalObservation],
+			decisions: [decision(), externalDecision]
+		});
+		await repo.deleteObservation('observation');
+		expect((await repo.load()).decisions.map(({ id }) => id)).toEqual(['external-decision']);
+		await repo.deleteCourse('course');
+		expect((await repo.load()).decisions[0]).not.toHaveProperty('targetSessionId');
+		await repo.clearWorkspace();
+		expect(await repo.load()).toEqual({
+			workspaceId: 'personal',
+			courses: [],
+			sessions: [],
+			observations: [],
+			decisions: []
+		});
+		const database = new (
+			await import('../../../src/lib/teacherflow/data/database')
+		).TeacherFlowDatabase(name);
+		await database.open();
+		expect(await database.recoveryBackups.where('workspaceId').equals('personal').count()).toBe(0);
+		await database.close();
+		const reopened = await openTeacherFlowRepository('personal', { databaseName: name, storage });
+		expect(reopened.migration).toMatchObject({ alreadyApplied: true, recovered: 0 });
+		expect(await reopened.load()).toEqual({
+			workspaceId: 'personal',
+			courses: [],
+			sessions: [],
+			observations: [],
+			decisions: []
+		});
+	});
 });
