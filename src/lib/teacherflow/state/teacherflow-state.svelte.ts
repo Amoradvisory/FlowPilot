@@ -70,6 +70,13 @@ type MutationContext = {
 	readonly mutationEpoch: number;
 };
 
+type WorkspaceRevision = {
+	committed: number;
+	published: number;
+};
+
+const MAX_STABLE_LOAD_ATTEMPTS = 8;
+
 function emptySnapshot(workspaceId: TeacherFlowWorkspaceId): WorkspaceSnapshot {
 	return { workspaceId, courses: [], sessions: [], observations: [], decisions: [] };
 }
@@ -95,6 +102,7 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 	let workspaceEpoch = 0;
 	let mutationEpoch = 0;
 	let mutationQueue = Promise.resolve();
+	const workspaceRevisions = new Map<TeacherFlowWorkspaceId, WorkspaceRevision>();
 
 	const read = <Value>(key: string): Value => values.get(key) as Value;
 	const write = <Value>(key: string, value: Value): void => {
@@ -131,6 +139,58 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 		return belongsToActiveWorkspace(context) && mutationEpoch === context.mutationEpoch;
 	}
 
+	function revisionState(workspaceId: TeacherFlowWorkspaceId): WorkspaceRevision {
+		const current = workspaceRevisions.get(workspaceId);
+		if (current) return current;
+		const initial = { committed: 0, published: 0 };
+		workspaceRevisions.set(workspaceId, initial);
+		return initial;
+	}
+
+	function markWorkspaceCommitted(workspaceId: TeacherFlowWorkspaceId): void {
+		revisionState(workspaceId).committed += 1;
+	}
+
+	function markWorkspacePublished(workspaceId: TeacherFlowWorkspaceId, revision: number): void {
+		const state = revisionState(workspaceId);
+		state.published = Math.max(state.published, revision);
+	}
+
+	async function loadStableSnapshot(
+		workspaceId: TeacherFlowWorkspaceId,
+		activeRepository: TeacherFlowRepository,
+		isRelevant: () => boolean
+	): Promise<{ snapshot: WorkspaceSnapshot; revision: number } | undefined> {
+		for (let attempt = 0; attempt < MAX_STABLE_LOAD_ATTEMPTS; attempt += 1) {
+			const revisionBeforeLoad = revisionState(workspaceId).committed;
+			const snapshot = await activeRepository.load();
+			if (!isRelevant()) return undefined;
+			const revisionAfterLoad = revisionState(workspaceId).committed;
+			if (revisionBeforeLoad === revisionAfterLoad) {
+				return { snapshot, revision: revisionAfterLoad };
+			}
+		}
+		throw new Error('TeacherFlow data did not reach a stable revision while loading');
+	}
+
+	async function refreshActiveWorkspaceAfterCommit(
+		workspaceId: TeacherFlowWorkspaceId
+	): Promise<void> {
+		if (read<TeacherFlowWorkspaceId>('workspaceId') !== workspaceId || !repository) return;
+		const revision = revisionState(workspaceId);
+		if (revision.published >= revision.committed) return;
+		const activeEpoch = workspaceEpoch;
+		const activeRepository = repository;
+		const remainsActive = () =>
+			workspaceEpoch === activeEpoch &&
+			read<TeacherFlowWorkspaceId>('workspaceId') === workspaceId &&
+			repository === activeRepository;
+		const loaded = await loadStableSnapshot(workspaceId, activeRepository, remainsActive);
+		if (!loaded || !remainsActive()) return;
+		write('snapshot', loaded.snapshot);
+		markWorkspacePublished(workspaceId, loaded.revision);
+	}
+
 	function isDraftFromActiveWorkspace(draft: ObservationFlowDraft): boolean {
 		const provenance = draft.observation.workspaceId;
 		return (
@@ -161,10 +221,8 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 			try {
 				await action(context);
 				committed = true;
-				if (!belongsToActiveWorkspace(context)) return;
-				const nextSnapshot = await context.repository.load();
-				if (!belongsToActiveWorkspace(context)) return;
-				write('snapshot', nextSnapshot);
+				markWorkspaceCommitted(context.workspaceId);
+				await refreshActiveWorkspaceAfterCommit(context.workspaceId);
 				if (!isLatestMutation(context)) return;
 				write('draft', undefined);
 				write('status', {
@@ -202,10 +260,13 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 				await nextRepository.ensureDemoSeed(createDemoSeed(options.clock));
 				if (!activationIsCurrent(epoch, nextWorkspaceId)) return;
 			}
-			const nextSnapshot = await nextRepository.load();
-			if (!activationIsCurrent(epoch, nextWorkspaceId)) return;
+			const loaded = await loadStableSnapshot(nextWorkspaceId, nextRepository, () =>
+				activationIsCurrent(epoch, nextWorkspaceId)
+			);
+			if (!loaded || !activationIsCurrent(epoch, nextWorkspaceId)) return;
 			repository = nextRepository;
-			write('snapshot', nextSnapshot);
+			write('snapshot', loaded.snapshot);
+			markWorkspacePublished(nextWorkspaceId, loaded.revision);
 			write('phase', isOnline() ? 'ready' : 'degraded');
 		} catch (error) {
 			if (!activationIsCurrent(epoch, nextWorkspaceId)) return;

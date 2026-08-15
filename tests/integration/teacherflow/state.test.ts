@@ -297,6 +297,110 @@ describe('TeacherFlow state controller', () => {
 		expect(state.status).toBeUndefined();
 	});
 
+	it('refreshes the current repository when an old same-workspace commit lands after reactivation', async () => {
+		const oldCommit = deferred<void>();
+		const oldStarted = deferred<void>();
+		let shared = empty(PERSONAL_WORKSPACE_ID);
+		const oldPersonal = repository(PERSONAL_WORKSPACE_ID);
+		oldPersonal.load = async () => shared;
+		oldPersonal.putObservationWithDecision = async (observation, decision) => {
+			oldStarted.resolve();
+			await oldCommit.promise;
+			shared = {
+				...shared,
+				observations: [...shared.observations, observation],
+				decisions: decision ? [...shared.decisions, decision] : shared.decisions
+			};
+		};
+		const currentPersonal = repository(PERSONAL_WORKSPACE_ID);
+		currentPersonal.load = async () => shared;
+		const demo = repository(DEMO_WORKSPACE_ID);
+		let personalOpenCount = 0;
+		const state = createTeacherFlowState({
+			repositoryFactory: async (workspaceId) => {
+				if (workspaceId === DEMO_WORKSPACE_ID) return demo;
+				personalOpenCount += 1;
+				return personalOpenCount === 1 ? oldPersonal : currentPersonal;
+			},
+			clock
+		});
+		await state.switchWorkspace(PERSONAL_WORKSPACE_ID);
+
+		const oldSave = state.saveObservationFlow(observationDraft('Commit A après retour sur A.'));
+		await oldStarted.promise;
+		await state.switchWorkspace(DEMO_WORKSPACE_ID);
+		await state.switchWorkspace(PERSONAL_WORKSPACE_ID);
+		expect(state.snapshot.observations).toEqual([]);
+
+		oldCommit.resolve();
+		await oldSave;
+
+		expect(state.snapshot.observations.map(({ note }) => note)).toEqual([
+			'Commit A après retour sur A.'
+		]);
+		expect(state.status).toBeUndefined();
+		expect(state.draft).toBeUndefined();
+		expect(state.phase).toBe('ready');
+	});
+
+	it('reloads activation when an old same-workspace commit lands during its load', async () => {
+		const oldCommit = deferred<void>();
+		const oldStarted = deferred<void>();
+		const activationLoadStarted = deferred<void>();
+		const releaseActivationLoad = deferred<void>();
+		let shared = empty(PERSONAL_WORKSPACE_ID);
+		const oldPersonal = repository(PERSONAL_WORKSPACE_ID);
+		oldPersonal.load = async () => shared;
+		oldPersonal.putObservationWithDecision = async (observation, decision) => {
+			oldStarted.resolve();
+			await oldCommit.promise;
+			shared = {
+				...shared,
+				observations: [...shared.observations, observation],
+				decisions: decision ? [...shared.decisions, decision] : shared.decisions
+			};
+		};
+		const currentPersonal = repository(PERSONAL_WORKSPACE_ID);
+		let activationLoads = 0;
+		currentPersonal.load = async () => {
+			activationLoads += 1;
+			if (activationLoads > 1) return shared;
+			const capturedBeforeCommit = shared;
+			activationLoadStarted.resolve();
+			await releaseActivationLoad.promise;
+			return capturedBeforeCommit;
+		};
+		const demo = repository(DEMO_WORKSPACE_ID);
+		let personalOpenCount = 0;
+		const state = createTeacherFlowState({
+			repositoryFactory: async (workspaceId) => {
+				if (workspaceId === DEMO_WORKSPACE_ID) return demo;
+				personalOpenCount += 1;
+				return personalOpenCount === 1 ? oldPersonal : currentPersonal;
+			},
+			clock
+		});
+		await state.switchWorkspace(PERSONAL_WORKSPACE_ID);
+		const oldSave = state.saveObservationFlow(observationDraft('Commit A pendant load A.'));
+		await oldStarted.promise;
+		await state.switchWorkspace(DEMO_WORKSPACE_ID);
+
+		const reactivation = state.switchWorkspace(PERSONAL_WORKSPACE_ID);
+		await activationLoadStarted.promise;
+		oldCommit.resolve();
+		await oldSave;
+		releaseActivationLoad.resolve();
+		await reactivation;
+
+		expect(activationLoads).toBe(2);
+		expect(state.snapshot.observations.map(({ note }) => note)).toEqual([
+			'Commit A pendant load A.'
+		]);
+		expect(state.status).toBeUndefined();
+		expect(state.draft).toBeUndefined();
+		expect(state.phase).toBe('ready');
+	});
+
 	it('serializes concurrent saves and only announces the current mutation after its reload', async () => {
 		const firstWrite = deferred<void>();
 		const secondWrite = deferred<void>();
