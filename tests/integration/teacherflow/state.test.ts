@@ -55,10 +55,10 @@ function deferred<Value>() {
 	return { promise, resolve, reject };
 }
 
-function observationDraft(note: string) {
+function observationDraft(note: string, workspaceId = PERSONAL_WORKSPACE_ID) {
 	return {
 		observation: {
-			workspaceId: PERSONAL_WORKSPACE_ID,
+			workspaceId,
 			sessionId: 'session',
 			signal: 'adjust' as const,
 			note
@@ -337,7 +337,7 @@ describe('TeacherFlow state controller', () => {
 	it('retains an exact draft saved while workspace activation is pending', async () => {
 		const opening = deferred<TeacherFlowRepository>();
 		const state = createTeacherFlowState({ repositoryFactory: async () => opening.promise, clock });
-		const draft = observationDraft('Saisie pendant le chargement.');
+		const draft = observationDraft('Saisie pendant le chargement.', DEMO_WORKSPACE_ID);
 
 		const hydration = state.hydrate();
 		await state.saveObservationFlow(draft);
@@ -358,7 +358,7 @@ describe('TeacherFlow state controller', () => {
 			},
 			clock
 		});
-		const draft = observationDraft('Saisie après échec du stockage.');
+		const draft = observationDraft('Saisie après échec du stockage.', DEMO_WORKSPACE_ID);
 
 		await state.hydrate();
 		await state.saveObservationFlow(draft);
@@ -369,5 +369,37 @@ describe('TeacherFlow state controller', () => {
 			kind: 'error',
 			message: expect.stringMatching(/Réessayez/u)
 		});
+	});
+	it('does not retain a late demo draft while personal workspace activation is pending', async () => {
+		const personalOpening = deferred<TeacherFlowRepository>();
+		const demo = repository(DEMO_WORKSPACE_ID);
+		const state = createTeacherFlowState({
+			repositoryFactory: async (workspaceId) =>
+				workspaceId === DEMO_WORKSPACE_ID ? demo : personalOpening.promise,
+			clock
+		});
+		await state.hydrate();
+
+		const switching = state.switchWorkspace(PERSONAL_WORKSPACE_ID);
+		await state.saveObservationFlow(observationDraft('Brouillon démo tardif.', DEMO_WORKSPACE_ID));
+		expect(state.workspaceId).toBe(PERSONAL_WORKSPACE_ID);
+		expect(state.draft).toBeUndefined();
+		personalOpening.resolve(repository(PERSONAL_WORKSPACE_ID));
+		await switching;
+		expect(state.draft).toBeUndefined();
+		expect(state.status).toBeUndefined();
+	});
+
+	it('retains a personal draft while personal workspace activation is pending', async () => {
+		const opening = deferred<TeacherFlowRepository>();
+		const state = createTeacherFlowState({ repositoryFactory: async () => opening.promise, clock });
+		const draft = observationDraft('Brouillon personnel pendant chargement.');
+
+		const switching = state.switchWorkspace(PERSONAL_WORKSPACE_ID);
+		await state.saveObservationFlow(draft);
+		expect(state.draft).toEqual(draft);
+		opening.resolve(repository(PERSONAL_WORKSPACE_ID));
+		await switching;
+		expect(state.draft).toEqual(draft);
 	});
 });

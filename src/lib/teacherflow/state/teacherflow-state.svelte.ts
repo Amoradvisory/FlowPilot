@@ -112,13 +112,24 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 		);
 	}
 
+	function isDraftFromActiveWorkspace(draft: ObservationFlowDraft): boolean {
+		const provenance = draft.observation.workspaceId;
+		return (
+			(provenance === DEMO_WORKSPACE_ID || provenance === PERSONAL_WORKSPACE_ID) &&
+			provenance === read<TeacherFlowWorkspaceId>('workspaceId')
+		);
+	}
+
 	function enqueueMutation(
 		retainedDraft: ObservationFlowDraft | undefined,
 		action: (context: MutationContext) => Promise<void>
 	): Promise<void> {
-		if (retainedDraft) write('draft', retainedDraft);
+		const draftToRetain =
+			retainedDraft && isDraftFromActiveWorkspace(retainedDraft) ? retainedDraft : undefined;
+		if (draftToRetain) write('draft', draftToRetain);
 		const context = captureMutation();
 		if (!context) {
+			if (retainedDraft && !draftToRetain) return Promise.resolve();
 			write('status', {
 				kind: 'error',
 				message: 'Le stockage local est encore en cours de préparation. Réessayez dans un instant.'
@@ -144,7 +155,7 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 			} catch (error) {
 				if (!mutationIsCurrent(context)) return;
 				if (committed) write('phase', 'error' satisfies TeacherFlowPhase);
-				if (retainedDraft) write('draft', retainedDraft);
+				if (draftToRetain) write('draft', draftToRetain);
 				write('status', {
 					kind: 'error',
 					message: recoveryMessage(error)
