@@ -118,7 +118,7 @@
 		},
 		{
 			title: 'Réemployer avec discernement',
-			body: 'La base local-first de FlowPilot est conservée, tandis que sa navigation généraliste disparaît de la preuve publique.'
+			body: 'La base local-first du prototype est conservée, tandis que sa navigation généraliste disparaît de la preuve publique.'
 		},
 		{
 			title: 'Rendre la décision visible',
@@ -676,7 +676,7 @@
 					<div>
 						<p class="text-xs font-black tracking-[0.2em] text-[#9ebdf3] uppercase">Étude de cas</p>
 						<h2 id="case-title" class="mt-4 text-4xl font-black tracking-[-0.045em] sm:text-5xl">
-							De FlowPilot à une preuve technopédagogique.
+							D’un prototype à une preuve technopédagogique.
 						</h2>
 						<p class="mt-6 text-base leading-8 text-[#c9d4e5]">
 							La décision clé n’a pas été de construire plus. Elle a été de retirer ce qui empêchait
@@ -695,7 +695,7 @@
 					</div>
 
 					<div class="grid gap-3 sm:grid-cols-2">
-						{#each [['Problème', 'Les observations post-cours sont précieuses, brèves et souvent perdues avant la prochaine préparation.'], ['Utilisateurs', 'Enseignants, formateurs et responsables pédagogiques qui veulent installer une amélioration continue explicable.'], ['Contrainte centrale', 'Rester assez rapide pour le terrain, sans collecter de données personnelles ni inventer une automatisation magique.'], ['Choix d’architecture', 'Réemployer la base SvelteKit local-first de FlowPilot, puis isoler une coque publique TeacherFlow sans authentification.'], ['Données', 'Deux séances et tous les groupes sont fictifs. Les captures saisies restent dans le localStorage du visiteur.'], ['Rôle de l’IA', 'Prévu comme assistance contrôlée à la reformulation et à la différenciation ; volontairement non branché dans cette preuve.'], ['Ce qui fonctionne', 'Sélection du signal, validation, normalisation, persistance locale, file d’amélioration et remise à zéro.'], ['Ce qui est simulé', 'Les priorités du jour, les séances, les compteurs de départ et les contenus pédagogiques exemples.'], ['Limites', 'Pas de compte, pas de synchronisation, pas de validation terrain multi-utilisateurs et aucune mesure de gain de temps.'], ['Prochaine expérience', 'Faire tester la capture en moins de 30 secondes par trois enseignants et mesurer clarté, effort et réutilisation réelle.']] as item}
+						{#each [['Problème', 'Les observations post-cours sont précieuses, brèves et souvent perdues avant la prochaine préparation.'], ['Utilisateurs', 'Enseignants, formateurs et responsables pédagogiques qui veulent installer une amélioration continue explicable.'], ['Contrainte centrale', 'Rester assez rapide pour le terrain, sans collecter de données personnelles ni inventer une automatisation magique.'], ['Choix d’architecture', 'Réemployer une base SvelteKit local-first, puis isoler une coque publique TeacherFlow sans authentification.'], ['Données', 'Deux séances et tous les groupes sont fictifs. Les captures saisies restent dans le localStorage du visiteur.'], ['Rôle de l’IA', 'Prévu comme assistance contrôlée à la reformulation et à la différenciation ; volontairement non branché dans cette preuve.'], ['Ce qui fonctionne', 'Sélection du signal, validation, normalisation, persistance locale, file d’amélioration et remise à zéro.'], ['Ce qui est simulé', 'Les priorités du jour, les séances, les compteurs de départ et les contenus pédagogiques exemples.'], ['Limites', 'Pas de compte, pas de synchronisation, pas de validation terrain multi-utilisateurs et aucune mesure de gain de temps.'], ['Prochaine expérience', 'Faire tester la capture en moins de 30 secondes par trois enseignants et mesurer clarté, effort et réutilisation réelle.']] as item}
 							<article class="rounded-2xl border border-white/10 bg-white/[0.055] p-5">
 								<h3 class="text-sm font-black text-[#ffad91]">{item[0]}</h3>
 								<p class="mt-2 text-sm leading-6 text-[#cbd6e7]">{item[1]}</p>

@@ -16,10 +16,8 @@ const config = {
 		}
 	},
 	kit: {
-		// The app is intentionally client-only (`ssr = false`), so static output keeps
-		// local builds reliable on Windows and still deploys cleanly on Vercel.
 		adapter: adapter({
-			fallback: 'index.html'
+			fallback: '404.html'
 		}),
 		paths: {
 			base
