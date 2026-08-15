@@ -1,4 +1,7 @@
 import { SvelteMap } from 'svelte/reactivity';
+import { TeacherFlowStorageError } from '../data/errors';
+import type { TeacherFlowRepository } from '../data/repository';
+import { createDemoSeed, DEMO_WORKSPACE_ID, PERSONAL_WORKSPACE_ID } from '../demo/seed';
 import { createDecision, createObservation } from '../domain/commands';
 import { selectMemory, selectToday } from '../domain/selectors';
 import type {
@@ -6,15 +9,12 @@ import type {
 	DecisionDraft,
 	MemoryFilters,
 	ObservationDraft,
-	WorkspaceId,
 	WorkspaceSnapshot
 } from '../domain/types';
-import type { TeacherFlowRepository } from '../data/repository';
-import { TeacherFlowStorageError } from '../data/errors';
-import { createDemoSeed, DEMO_WORKSPACE_ID, PERSONAL_WORKSPACE_ID } from '../demo/seed';
 
 export type TeacherFlowPhase = 'loading' | 'ready' | 'degraded' | 'error';
 export type TeacherFlowStatus = { readonly kind: 'success' | 'error'; readonly message: string };
+export type TeacherFlowWorkspaceId = typeof DEMO_WORKSPACE_ID | typeof PERSONAL_WORKSPACE_ID;
 
 export interface ObservationFlowDraft {
 	readonly observation: ObservationDraft;
@@ -22,22 +22,24 @@ export interface ObservationFlowDraft {
 }
 
 export interface TeacherFlowStateOptions {
-	readonly repositoryFactory: (workspaceId: WorkspaceId) => Promise<TeacherFlowRepository>;
+	readonly repositoryFactory: (
+		workspaceId: TeacherFlowWorkspaceId
+	) => Promise<TeacherFlowRepository>;
 	readonly clock: Clock;
-	/** False means the app remains usable locally but reports a degraded network condition. */
+	/** Offline does not block local work; it only exposes the degraded network condition. */
 	readonly network?: () => boolean;
 }
 
 export interface TeacherFlowState {
 	readonly phase: TeacherFlowPhase;
-	readonly workspaceId: WorkspaceId;
+	readonly workspaceId: TeacherFlowWorkspaceId;
 	readonly snapshot: WorkspaceSnapshot;
 	readonly draft?: ObservationFlowDraft;
 	readonly status?: TeacherFlowStatus;
 	readonly today: ReturnType<typeof selectToday>;
 	memory(filters: MemoryFilters): ReturnType<typeof selectMemory>;
 	hydrate(): Promise<void>;
-	switchWorkspace(workspaceId: WorkspaceId): Promise<void>;
+	switchWorkspace(workspaceId: TeacherFlowWorkspaceId): Promise<void>;
 	saveObservationFlow(draft: ObservationFlowDraft): Promise<void>;
 	saveDecision(draft: DecisionDraft): Promise<void>;
 	deleteObservation(observationId: string): Promise<void>;
@@ -45,13 +47,26 @@ export interface TeacherFlowState {
 	resetPersonal(): Promise<void>;
 }
 
-function emptySnapshot(workspaceId: WorkspaceId): WorkspaceSnapshot {
+type MutationContext = {
+	readonly workspaceEpoch: number;
+	readonly workspaceId: TeacherFlowWorkspaceId;
+	readonly repository: TeacherFlowRepository;
+	readonly mutationEpoch: number;
+};
+
+function emptySnapshot(workspaceId: TeacherFlowWorkspaceId): WorkspaceSnapshot {
 	return { workspaceId, courses: [], sessions: [], observations: [], decisions: [] };
 }
 
 function recoveryMessage(error: unknown): string {
 	if (error instanceof TeacherFlowStorageError) return error.recoveryInstruction;
 	return 'La modification n’a pas été enregistrée localement. Réessayez.';
+}
+
+function assertWorkspaceId(workspaceId: string): asserts workspaceId is TeacherFlowWorkspaceId {
+	if (workspaceId !== DEMO_WORKSPACE_ID && workspaceId !== PERSONAL_WORKSPACE_ID) {
+		throw new Error('Unknown TeacherFlow workspace');
+	}
 }
 
 export function createTeacherFlowState(options: TeacherFlowStateOptions): TeacherFlowState {
@@ -61,7 +76,9 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 		['snapshot', emptySnapshot(DEMO_WORKSPACE_ID)]
 	]);
 	let repository: TeacherFlowRepository | undefined;
-	let operation = 0;
+	let workspaceEpoch = 0;
+	let mutationEpoch = 0;
+	let mutationQueue = Promise.resolve();
 
 	const read = <Value>(key: string): Value => values.get(key) as Value;
 	const write = <Value>(key: string, value: Value): void => {
@@ -72,8 +89,75 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 		return options.network?.() ?? true;
 	}
 
-	async function activate(nextWorkspaceId: WorkspaceId): Promise<void> {
-		const currentOperation = ++operation;
+	function activationIsCurrent(epoch: number, workspaceId: TeacherFlowWorkspaceId): boolean {
+		return workspaceEpoch === epoch && read<TeacherFlowWorkspaceId>('workspaceId') === workspaceId;
+	}
+
+	function captureMutation(): MutationContext | undefined {
+		if (!repository) return undefined;
+		return {
+			workspaceEpoch,
+			workspaceId: read<TeacherFlowWorkspaceId>('workspaceId'),
+			repository,
+			mutationEpoch: ++mutationEpoch
+		};
+	}
+
+	function mutationIsCurrent(context: MutationContext): boolean {
+		return (
+			workspaceEpoch === context.workspaceEpoch &&
+			read<TeacherFlowWorkspaceId>('workspaceId') === context.workspaceId &&
+			repository === context.repository &&
+			mutationEpoch === context.mutationEpoch
+		);
+	}
+
+	function enqueueMutation(
+		retainedDraft: ObservationFlowDraft | undefined,
+		action: (context: MutationContext) => Promise<void>
+	): Promise<void> {
+		const context = captureMutation();
+		if (!context) {
+			write('status', {
+				kind: 'error',
+				message: 'Le stockage local est encore en cours de préparation. Réessayez dans un instant.'
+			} satisfies TeacherFlowStatus);
+			return Promise.resolve();
+		}
+		write('status', undefined);
+		if (retainedDraft) write('draft', retainedDraft);
+		const run = mutationQueue.then(async () => {
+			let committed = false;
+			try {
+				await action(context);
+				committed = true;
+				if (!mutationIsCurrent(context)) return;
+				const nextSnapshot = await context.repository.load();
+				if (!mutationIsCurrent(context)) return;
+				write('snapshot', nextSnapshot);
+				write('draft', undefined);
+				write('status', {
+					kind: 'success',
+					message: 'Enregistré localement'
+				} satisfies TeacherFlowStatus);
+				write('phase', isOnline() ? 'ready' : 'degraded');
+			} catch (error) {
+				if (!mutationIsCurrent(context)) return;
+				if (committed) write('phase', 'error' satisfies TeacherFlowPhase);
+				if (retainedDraft) write('draft', retainedDraft);
+				write('status', {
+					kind: 'error',
+					message: recoveryMessage(error)
+				} satisfies TeacherFlowStatus);
+			}
+		});
+		mutationQueue = run.catch(() => undefined);
+		return run;
+	}
+
+	async function activate(nextWorkspaceId: TeacherFlowWorkspaceId): Promise<void> {
+		const epoch = ++workspaceEpoch;
+		mutationEpoch += 1;
 		write('workspaceId', nextWorkspaceId);
 		write('snapshot', emptySnapshot(nextWorkspaceId));
 		write('draft', undefined);
@@ -82,42 +166,19 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 		repository = undefined;
 		try {
 			const nextRepository = await options.repositoryFactory(nextWorkspaceId);
+			if (!activationIsCurrent(epoch, nextWorkspaceId)) return;
+			if (nextWorkspaceId === DEMO_WORKSPACE_ID) {
+				await nextRepository.ensureDemoSeed(createDemoSeed(options.clock));
+				if (!activationIsCurrent(epoch, nextWorkspaceId)) return;
+			}
 			const nextSnapshot = await nextRepository.load();
-			if (currentOperation !== operation) return;
+			if (!activationIsCurrent(epoch, nextWorkspaceId)) return;
 			repository = nextRepository;
 			write('snapshot', nextSnapshot);
 			write('phase', isOnline() ? 'ready' : 'degraded');
 		} catch (error) {
-			if (currentOperation !== operation) return;
+			if (!activationIsCurrent(epoch, nextWorkspaceId)) return;
 			write('phase', 'error' satisfies TeacherFlowPhase);
-			write('status', {
-				kind: 'error',
-				message: recoveryMessage(error)
-			} satisfies TeacherFlowStatus);
-		}
-	}
-
-	function activeRepository(): TeacherFlowRepository {
-		if (!repository) throw new Error('TeacherFlow is not ready');
-		return repository;
-	}
-
-	async function refreshAfterCommit(successMessage = 'Enregistré localement'): Promise<void> {
-		write('snapshot', await activeRepository().load());
-		write('draft', undefined);
-		write('status', { kind: 'success', message: successMessage } satisfies TeacherFlowStatus);
-		write('phase', isOnline() ? 'ready' : 'degraded');
-	}
-
-	async function persist(
-		action: () => Promise<void>,
-		retainedDraft?: ObservationFlowDraft
-	): Promise<void> {
-		try {
-			await action();
-			await refreshAfterCommit();
-		} catch (error) {
-			if (retainedDraft) write('draft', retainedDraft);
 			write('status', {
 				kind: 'error',
 				message: recoveryMessage(error)
@@ -130,7 +191,7 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 			return read<TeacherFlowPhase>('phase');
 		},
 		get workspaceId() {
-			return read<WorkspaceId>('workspaceId');
+			return read<TeacherFlowWorkspaceId>('workspaceId');
 		},
 		get snapshot() {
 			return read<WorkspaceSnapshot>('snapshot');
@@ -151,48 +212,49 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 			return activate(DEMO_WORKSPACE_ID);
 		},
 		switchWorkspace(nextWorkspaceId) {
+			assertWorkspaceId(nextWorkspaceId);
 			return activate(nextWorkspaceId);
 		},
 		async saveObservationFlow(nextDraft) {
-			write('draft', nextDraft);
-			await persist(() => {
+			await enqueueMutation(nextDraft, (context) => {
 				const observation = createObservation(
-					{ ...nextDraft.observation, workspaceId: read<WorkspaceId>('workspaceId') },
+					{ ...nextDraft.observation, workspaceId: context.workspaceId },
 					options.clock
 				);
 				const decision = nextDraft.decision
 					? createDecision(
 							{
 								...nextDraft.decision,
-								workspaceId: read<WorkspaceId>('workspaceId'),
+								workspaceId: context.workspaceId,
 								observationId: observation.id
 							},
 							options.clock
 						)
 					: undefined;
-				return activeRepository().putObservationWithDecision(observation, decision);
-			}, nextDraft);
+				return context.repository.putObservationWithDecision(observation, decision);
+			});
 		},
 		async saveDecision(nextDraft) {
-			await persist(() =>
-				activeRepository().putDecision(
-					createDecision(
-						{ ...nextDraft, workspaceId: read<WorkspaceId>('workspaceId') },
-						options.clock
-					)
+			await enqueueMutation(undefined, (context) =>
+				context.repository.putDecision(
+					createDecision({ ...nextDraft, workspaceId: context.workspaceId }, options.clock)
 				)
 			);
 		},
 		async deleteObservation(observationId) {
-			await persist(() => activeRepository().deleteObservation(observationId));
+			await enqueueMutation(undefined, (context) =>
+				context.repository.deleteObservation(observationId)
+			);
 		},
 		async resetDemo() {
-			if (read<WorkspaceId>('workspaceId') !== DEMO_WORKSPACE_ID) return;
-			await persist(() => activeRepository().replaceWorkspace(createDemoSeed(options.clock)));
+			if (read<TeacherFlowWorkspaceId>('workspaceId') !== DEMO_WORKSPACE_ID) return;
+			await enqueueMutation(undefined, (context) =>
+				context.repository.replaceWorkspace(createDemoSeed(options.clock))
+			);
 		},
 		async resetPersonal() {
-			if (read<WorkspaceId>('workspaceId') !== PERSONAL_WORKSPACE_ID) return;
-			await persist(() => activeRepository().clearWorkspace());
+			if (read<TeacherFlowWorkspaceId>('workspaceId') !== PERSONAL_WORKSPACE_ID) return;
+			await enqueueMutation(undefined, (context) => context.repository.clearWorkspace());
 		}
 	};
 }

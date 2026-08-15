@@ -36,4 +36,18 @@ describe('TeacherFlow demo seed', () => {
 		expect(content).not.toMatch(/\b(élève|eleve|collège|college|lycée|lycee|école|ecole)\b/u);
 		expect(content).not.toMatch(/\b(marie|paul|lucas|emma|dupont)\b/u);
 	});
+
+	it('reads its clock once, so a progressive clock cannot split one snapshot across instants', () => {
+		let calls = 0;
+		const progressiveClock = () => new Date(`2026-08-15T09:00:0${calls++}.000Z`);
+
+		const seed = createDemoSeed(progressiveClock);
+
+		expect(calls).toBe(1);
+		expect(seed.observations.map((observation) => observation.id)).toEqual([
+			'demo-observation-representations'
+		]);
+		expect(seed.decisions.map((decision) => decision.id)).toEqual(['demo-decision-common-example']);
+		expect(seed.courses[0]?.updatedAt).toBe('2026-08-15T09:00:00.000Z');
+	});
 });

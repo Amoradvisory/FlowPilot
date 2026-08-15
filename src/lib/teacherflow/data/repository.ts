@@ -31,6 +31,8 @@ export interface TeacherFlowRepository {
 	deleteCourse(courseId: EntityId): Promise<void>;
 	replaceWorkspace(snapshot: WorkspaceSnapshot): Promise<void>;
 	clearWorkspace(): Promise<void>;
+	/** Atomically seeds only a new demo workspace; a durable marker makes this idempotent. */
+	ensureDemoSeed(snapshot: WorkspaceSnapshot): Promise<void>;
 }
 
 export interface OpenTeacherFlowRepositoryOptions {
@@ -164,6 +166,39 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 					updatedAt: new Date().toISOString()
 				});
 			}
+		});
+	}
+
+	async ensureDemoSeed(snapshot: WorkspaceSnapshot): Promise<void> {
+		this.assertWorkspace(snapshot.workspaceId);
+		if (this.workspaceId !== 'demo') {
+			throw new DomainError(
+				'workspace_mismatch',
+				'Only the demo workspace can be seeded',
+				'workspaceId'
+			);
+		}
+		validateWorkspaceSnapshot(snapshot);
+		await this.write(async (current) => {
+			const marker = await this.database.meta.get([this.workspaceId, 'demo-seed-v1']);
+			if (marker) return;
+			if (
+				current.courses.length === 0 &&
+				current.sessions.length === 0 &&
+				current.observations.length === 0 &&
+				current.decisions.length === 0
+			) {
+				await this.database.courses.bulkPut(snapshot.courses);
+				await this.database.sessions.bulkPut(snapshot.sessions);
+				await this.database.observations.bulkPut(snapshot.observations);
+				await this.database.decisions.bulkPut(snapshot.decisions);
+			}
+			await this.database.meta.put({
+				workspaceId: this.workspaceId,
+				key: 'demo-seed-v1',
+				value: { initialized: true },
+				updatedAt: snapshot.courses[0]!.updatedAt
+			});
 		});
 	}
 

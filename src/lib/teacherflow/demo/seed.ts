@@ -4,8 +4,8 @@ import type { Clock, WorkspaceSnapshot } from '../domain/types';
 export const DEMO_WORKSPACE_ID = 'demo';
 export const PERSONAL_WORKSPACE_ID = 'personal';
 
-function iso(clock: Clock, offsetDays: number): string {
-	return new Date(clock().getTime() + offsetDays * 24 * 60 * 60 * 1000).toISOString();
+function iso(base: Date, offsetDays: number): string {
+	return new Date(base.getTime() + offsetDays * 24 * 60 * 60 * 1000).toISOString();
 }
 
 /**
@@ -13,9 +13,10 @@ function iso(clock: Clock, offsetDays: number): string {
  * no individual, institution or impact claim is represented here.
  */
 export function createDemoSeed(clock: Clock): WorkspaceSnapshot {
-	const now = iso(clock, 0);
-	const observedAt = iso(clock, -1);
-	const futureAt = iso(clock, 2);
+	const base = clock();
+	const now = iso(base, 0);
+	const observedAt = iso(base, -1);
+	const futureAt = iso(base, 2);
 
 	return {
 		workspaceId: DEMO_WORKSPACE_ID,

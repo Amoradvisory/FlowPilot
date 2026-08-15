@@ -8,6 +8,7 @@ import type {
 	WorkspaceSnapshot
 } from '../../../src/lib/teacherflow/domain/types';
 import { openTeacherFlowRepository } from '../../../src/lib/teacherflow/data/repository';
+import { createDemoSeed } from '../../../src/lib/teacherflow/demo/seed';
 
 const now = '2026-08-15T09:00:00.000Z';
 const names: string[] = [];
@@ -238,5 +239,48 @@ describe('TeacherFlowRepository', () => {
 			'forced linked-write failure'
 		);
 		expect(await repo.load()).toEqual(before);
+	});
+
+	it('seeds a new demo once and preserves a deliberately cleared demo on reopening', async () => {
+		const name = databaseName();
+		const seed = createDemoSeed(() => new Date(now));
+		const storedSeed = {
+			...seed,
+			sessions: [...seed.sessions].sort((left, right) => left.id.localeCompare(right.id))
+		};
+		const first = await openTeacherFlowRepository('demo', {
+			databaseName: name,
+			migrateLegacy: false
+		});
+		await first.ensureDemoSeed(seed);
+		expect(await first.load()).toEqual(storedSeed);
+
+		const reopened = await openTeacherFlowRepository('demo', {
+			databaseName: name,
+			migrateLegacy: false
+		});
+		await reopened.ensureDemoSeed(seed);
+		expect(await reopened.load()).toEqual(storedSeed);
+
+		await reopened.clearWorkspace();
+		const cleared = await openTeacherFlowRepository('demo', {
+			databaseName: name,
+			migrateLegacy: false
+		});
+		await cleared.ensureDemoSeed(seed);
+		expect(await cleared.load()).toEqual({
+			workspaceId: 'demo',
+			courses: [],
+			sessions: [],
+			observations: [],
+			decisions: []
+		});
+		await cleared.replaceWorkspace(seed);
+		const resetReopened = await openTeacherFlowRepository('demo', {
+			databaseName: name,
+			migrateLegacy: false
+		});
+		await resetReopened.ensureDemoSeed(seed);
+		expect(await resetReopened.load()).toEqual(storedSeed);
 	});
 });
