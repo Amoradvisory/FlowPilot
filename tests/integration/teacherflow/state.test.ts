@@ -21,8 +21,18 @@ function repository(workspaceId: string, snapshot = empty(workspaceId)): Teacher
 		workspaceId,
 		migration: { recovered: 0, ignored: 0, backupCreated: false, alreadyApplied: false },
 		load: async () => current,
-		putCourse: async () => {},
-		putSession: async () => {},
+		putCourse: async (course) => {
+			current = {
+				...current,
+				courses: [...current.courses.filter(({ id }) => id !== course.id), course]
+			};
+		},
+		putSession: async (session) => {
+			current = {
+				...current,
+				sessions: [...current.sessions.filter(({ id }) => id !== session.id), session]
+			};
+		},
 		putObservationWithDecision: async (observation, decision) => {
 			current = {
 				...current,
@@ -34,7 +44,13 @@ function repository(workspaceId: string, snapshot = empty(workspaceId)): Teacher
 			current = { ...current, decisions: [...current.decisions, decision] };
 		},
 		deleteObservation: async () => {},
-		deleteCourse: async () => {},
+		deleteCourse: async (courseId) => {
+			current = {
+				...current,
+				courses: current.courses.filter(({ id }) => id !== courseId),
+				sessions: current.sessions.filter(({ courseId: id }) => id !== courseId)
+			};
+		},
 		replaceWorkspace: async (next) => {
 			current = next;
 		},
@@ -142,6 +158,64 @@ describe('TeacherFlow state controller', () => {
 		await state.switchWorkspace(PERSONAL_WORKSPACE_ID);
 		expect(state.workspaceId).toBe(PERSONAL_WORKSPACE_ID);
 		expect(state.snapshot).toEqual(empty(PERSONAL_WORKSPACE_ID));
+	});
+
+	it('creates, edits and archives a course, then creates and edits its first session', async () => {
+		const personal = repository(PERSONAL_WORKSPACE_ID);
+		const state = createTeacherFlowState({ repositoryFactory: async () => personal, clock });
+		await state.switchWorkspace(PERSONAL_WORKSPACE_ID);
+
+		await state.saveCourse({
+			workspaceId: DEMO_WORKSPACE_ID,
+			name: 'Mathématiques',
+			subject: 'Algèbre',
+			colorToken: 'moss'
+		});
+		const createdCourse = state.snapshot.courses[0]!;
+		expect(createdCourse).toMatchObject({
+			workspaceId: PERSONAL_WORKSPACE_ID,
+			name: 'Mathématiques'
+		});
+
+		await state.saveCourse({ ...createdCourse, name: 'Mathématiques appliquées' }, createdCourse);
+		expect(state.snapshot.courses[0]).toMatchObject({ name: 'Mathématiques appliquées' });
+
+		await state.saveSession({
+			workspaceId: DEMO_WORKSPACE_ID,
+			courseId: createdCourse.id,
+			title: 'Première séance',
+			scheduledFor: '2026-08-18T09:00:00.000Z'
+		});
+		const createdSession = state.snapshot.sessions[0]!;
+		await state.saveSession(
+			{ ...createdSession, title: 'Première séance ajustée' },
+			createdSession
+		);
+		expect(state.snapshot.sessions[0]).toMatchObject({
+			workspaceId: PERSONAL_WORKSPACE_ID,
+			title: 'Première séance ajustée'
+		});
+
+		await state.archiveCourse(createdCourse);
+		expect(state.snapshot.courses[0]?.archivedAt).toBe('2026-08-15T09:00:00.000Z');
+	});
+
+	it('refuses to archive a course object from another workspace', async () => {
+		const personal = repository(PERSONAL_WORKSPACE_ID);
+		const state = createTeacherFlowState({ repositoryFactory: async () => personal, clock });
+		await state.switchWorkspace(PERSONAL_WORKSPACE_ID);
+
+		await state.archiveCourse({
+			id: 'demo-course',
+			workspaceId: DEMO_WORKSPACE_ID,
+			name: 'Cours de démonstration',
+			colorToken: 'moss',
+			createdAt: '2026-08-15T09:00:00.000Z',
+			updatedAt: '2026-08-15T09:00:00.000Z'
+		});
+
+		expect(state.snapshot.courses).toEqual([]);
+		expect(state.status).toMatchObject({ kind: 'error' });
 	});
 
 	it('resets the demo deterministically and clears the personal workspace completely', async () => {

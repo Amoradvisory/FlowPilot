@@ -57,6 +57,50 @@ export function createCourse(
 	};
 }
 
+export function updateCourse(
+	course: Course,
+	draft: CourseDraft,
+	clock: Clock = systemClock
+): Course {
+	const activeWorkspace = workspaceId(draft.workspaceId);
+	if (course.workspaceId !== activeWorkspace) {
+		throw new DomainError(
+			'workspace_mismatch',
+			'Course belongs to another workspace',
+			'workspaceId'
+		);
+	}
+	const now = timestamp(clock);
+	if (Date.parse(now) < Date.parse(isoUtc(course.updatedAt, 'updatedAt'))) {
+		throw new DomainError('invalid_date_order', 'now cannot precede updatedAt', 'now');
+	}
+	const subject = optionalString(draft.subject, 'subject', FIELD_LIMITS.courseSubject);
+	return {
+		id: entityId(course.id),
+		workspaceId: activeWorkspace,
+		name: requiredString(draft.name, 'name', FIELD_LIMITS.courseName),
+		...(subject ? { subject } : {}),
+		colorToken: requiredString(draft.colorToken, 'colorToken', FIELD_LIMITS.colorToken),
+		...(course.archivedAt ? { archivedAt: isoUtc(course.archivedAt, 'archivedAt') } : {}),
+		createdAt: isoUtc(course.createdAt, 'createdAt'),
+		updatedAt: now
+	};
+}
+
+export function archiveCourse(course: Course, clock: Clock = systemClock): Course {
+	const now = timestamp(clock);
+	if (Date.parse(now) < Date.parse(isoUtc(course.updatedAt, 'updatedAt'))) {
+		throw new DomainError('invalid_date_order', 'now cannot precede updatedAt', 'now');
+	}
+	return {
+		...course,
+		id: entityId(course.id),
+		workspaceId: workspaceId(course.workspaceId),
+		archivedAt: now,
+		updatedAt: now
+	};
+}
+
 export function createSession(
 	draft: SessionDraft,
 	clock: Clock = systemClock,
@@ -72,6 +116,36 @@ export function createSession(
 		...(scheduledFor ? { scheduledFor } : {}),
 		status: sessionStatus(draft.status ?? 'planned'),
 		createdAt: now,
+		updatedAt: now
+	};
+}
+
+export function updateSession(
+	session: Session,
+	draft: SessionDraft,
+	clock: Clock = systemClock
+): Session {
+	const activeWorkspace = workspaceId(draft.workspaceId);
+	if (session.workspaceId !== activeWorkspace) {
+		throw new DomainError(
+			'workspace_mismatch',
+			'Session belongs to another workspace',
+			'workspaceId'
+		);
+	}
+	const now = timestamp(clock);
+	if (Date.parse(now) < Date.parse(isoUtc(session.updatedAt, 'updatedAt'))) {
+		throw new DomainError('invalid_date_order', 'now cannot precede updatedAt', 'now');
+	}
+	const scheduledFor = draft.scheduledFor ? isoUtc(draft.scheduledFor, 'scheduledFor') : undefined;
+	return {
+		id: entityId(session.id),
+		workspaceId: activeWorkspace,
+		courseId: entityId(draft.courseId, 'courseId'),
+		title: requiredString(draft.title, 'title', FIELD_LIMITS.sessionTitle),
+		...(scheduledFor ? { scheduledFor } : {}),
+		status: sessionStatus(draft.status ?? session.status),
+		createdAt: isoUtc(session.createdAt, 'createdAt'),
 		updatedAt: now
 	};
 }

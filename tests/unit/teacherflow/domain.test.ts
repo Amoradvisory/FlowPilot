@@ -4,9 +4,12 @@ import {
 	createDecision,
 	createObservation,
 	createSession,
+	archiveCourse,
 	planCourseDeletion,
 	planObservationDeletion,
-	updateDecisionStatus
+	updateCourse,
+	updateDecisionStatus,
+	updateSession
 } from '../../../src/lib/teacherflow/domain/commands';
 import {
 	DomainError,
@@ -166,6 +169,59 @@ describe('TeacherFlow domain commands', () => {
 			name: 'Mathématiques appliquées',
 			colorToken: 'warm indigo',
 			createdAt: NOW,
+			updatedAt: NOW
+		});
+	});
+
+	it('edits and archives a course without replacing its identity or creation time', () => {
+		const initial = makeSnapshot().courses[0];
+		const edited = updateCourse(
+			initial,
+			{
+				workspaceId: 'personal',
+				name: '  Mathématiques appliquées ',
+				subject: ' Algèbre ',
+				colorToken: ' moss '
+			},
+			clock
+		);
+		const archived = archiveCourse(edited, () => new Date('2026-08-15T09:00:00.000Z'));
+
+		expect(edited).toMatchObject({
+			id: initial.id,
+			createdAt: initial.createdAt,
+			name: 'Mathématiques appliquées',
+			subject: 'Algèbre',
+			colorToken: 'moss',
+			updatedAt: NOW
+		});
+		expect(archived).toMatchObject({
+			id: initial.id,
+			archivedAt: '2026-08-15T09:00:00.000Z',
+			updatedAt: '2026-08-15T09:00:00.000Z'
+		});
+	});
+
+	it('edits a session while preserving its identity and normalizing the optional date', () => {
+		const initial = makeSnapshot().sessions[1];
+		const edited = updateSession(
+			initial,
+			{
+				workspaceId: 'personal',
+				courseId: 'course-history',
+				title: '  Nouvelle progression ',
+				scheduledFor: '2026-08-20T11:00:00+02:00',
+				status: 'planned'
+			},
+			clock
+		);
+
+		expect(edited).toEqual({
+			...initial,
+			courseId: 'course-history',
+			title: 'Nouvelle progression',
+			scheduledFor: '2026-08-20T09:00:00.000Z',
+			status: 'planned',
 			updatedAt: NOW
 		});
 	});

@@ -2,13 +2,26 @@ import { SvelteMap } from 'svelte/reactivity';
 import { TeacherFlowStorageError } from '../data/errors';
 import type { TeacherFlowRepository } from '../data/repository';
 import { createDemoSeed, DEMO_WORKSPACE_ID, PERSONAL_WORKSPACE_ID } from '../demo/seed';
-import { createDecision, createObservation } from '../domain/commands';
+import {
+	archiveCourse,
+	createCourse,
+	createDecision,
+	createObservation,
+	createSession,
+	updateCourse,
+	updateSession
+} from '../domain/commands';
+import { DomainError } from '../domain/invariants';
 import { selectMemory, selectToday } from '../domain/selectors';
 import type {
 	Clock,
+	Course,
+	CourseDraft,
 	DecisionDraft,
 	MemoryFilters,
 	ObservationDraft,
+	Session,
+	SessionDraft,
 	WorkspaceSnapshot
 } from '../domain/types';
 
@@ -40,6 +53,9 @@ export interface TeacherFlowState {
 	memory(filters: MemoryFilters): ReturnType<typeof selectMemory>;
 	hydrate(): Promise<void>;
 	switchWorkspace(workspaceId: TeacherFlowWorkspaceId): Promise<void>;
+	saveCourse(draft: CourseDraft, current?: Course): Promise<void>;
+	archiveCourse(course: Course): Promise<void>;
+	saveSession(draft: SessionDraft, current?: Session): Promise<void>;
 	saveObservationFlow(draft: ObservationFlowDraft): Promise<void>;
 	saveDecision(draft: DecisionDraft): Promise<void>;
 	deleteObservation(observationId: string): Promise<void>;
@@ -225,6 +241,44 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 		switchWorkspace(nextWorkspaceId) {
 			assertWorkspaceId(nextWorkspaceId);
 			return activate(nextWorkspaceId);
+		},
+		async saveCourse(nextDraft, current) {
+			await enqueueMutation(undefined, (context) =>
+				context.repository.putCourse(
+					current
+						? updateCourse(
+								current,
+								{ ...nextDraft, workspaceId: context.workspaceId },
+								options.clock
+							)
+						: createCourse({ ...nextDraft, workspaceId: context.workspaceId }, options.clock)
+				)
+			);
+		},
+		async archiveCourse(course) {
+			await enqueueMutation(undefined, (context) => {
+				if (course.workspaceId !== context.workspaceId) {
+					throw new DomainError(
+						'workspace_mismatch',
+						'Course belongs to another workspace',
+						'workspaceId'
+					);
+				}
+				return context.repository.putCourse(archiveCourse(course, options.clock));
+			});
+		},
+		async saveSession(nextDraft, current) {
+			await enqueueMutation(undefined, (context) =>
+				context.repository.putSession(
+					current
+						? updateSession(
+								current,
+								{ ...nextDraft, workspaceId: context.workspaceId },
+								options.clock
+							)
+						: createSession({ ...nextDraft, workspaceId: context.workspaceId }, options.clock)
+				)
+			);
 		},
 		async saveObservationFlow(nextDraft) {
 			await enqueueMutation(nextDraft, (context) => {

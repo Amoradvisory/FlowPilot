@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import AppShell from '$lib/teacherflow/components/AppShell.svelte';
 	import { setTeacherFlowState } from '$lib/teacherflow/state/context';
 	import { createTeacherFlowState } from '$lib/teacherflow/state/teacherflow-state.svelte';
 	import '../teacherflow.css';
@@ -20,16 +21,4 @@
 	});
 </script>
 
-<div class="teacherflow-app">
-	<header>
-		<p>TeacherFlow · démonstrateur local</p>
-	</header>
-	<main>
-		<h1>Transformer une observation en prochaine décision</h1>
-		<p>
-			Cette démonstration fictive montre une boucle observation, décision, puis préparation d’une
-			séance future. Les données restent dans ce navigateur.
-		</p>
-		{@render children()}
-	</main>
-</div>
+<AppShell>{@render children()}</AppShell>
