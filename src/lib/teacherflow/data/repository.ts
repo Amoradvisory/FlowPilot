@@ -73,15 +73,15 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 	}
 
 	async putCourse(course: Course): Promise<void> {
-		await this.replaceEntity('courses', course);
+		await this.replaceEntity(['courses', course]);
 	}
 
 	async putSession(session: Session): Promise<void> {
-		await this.replaceEntity('sessions', session);
+		await this.replaceEntity(['sessions', session]);
 	}
 
 	async putDecision(decision: Decision): Promise<void> {
-		await this.replaceEntity('decisions', decision);
+		await this.replaceEntity(['decisions', decision]);
 	}
 
 	async putObservationWithDecision(observation: Observation, decision?: Decision): Promise<void> {
@@ -168,14 +168,40 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 	}
 
 	private async replaceEntity(
-		table: 'courses' | 'sessions' | 'decisions',
-		entity: Course | Session | Decision
+		entry: ['courses', Course] | ['sessions', Session] | ['decisions', Decision]
 	): Promise<void> {
+		const entity = entry[1];
 		this.assertWorkspace(entity.workspaceId);
 		await this.write(async (snapshot) => {
-			const next: WorkspaceSnapshot = { ...snapshot, [table]: replace(snapshot[table], entity) };
-			validateWorkspaceSnapshot(next);
-			await this.database[table].put(entity as never);
+			switch (entry[0]) {
+				case 'courses': {
+					const next: WorkspaceSnapshot = {
+						...snapshot,
+						courses: replace(snapshot.courses, entry[1])
+					};
+					validateWorkspaceSnapshot(next);
+					await this.database.courses.put(entry[1]);
+					return;
+				}
+				case 'sessions': {
+					const next: WorkspaceSnapshot = {
+						...snapshot,
+						sessions: replace(snapshot.sessions, entry[1])
+					};
+					validateWorkspaceSnapshot(next);
+					await this.database.sessions.put(entry[1]);
+					return;
+				}
+				case 'decisions': {
+					const next: WorkspaceSnapshot = {
+						...snapshot,
+						decisions: replace(snapshot.decisions, entry[1])
+					};
+					validateWorkspaceSnapshot(next);
+					await this.database.decisions.put(entry[1]);
+					return;
+				}
+			}
 		});
 	}
 
