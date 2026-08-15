@@ -21,6 +21,7 @@ export const FIELD_LIMITS = {
 export type DomainErrorCode =
 	| 'required'
 	| 'too_long'
+	| 'non_canonical'
 	| 'invalid_date'
 	| 'invalid_date_order'
 	| 'invalid_signal'
@@ -113,10 +114,49 @@ export function decisionStatus(value: DecisionStatus): DecisionStatus {
 	return value;
 }
 
+function assertCanonical(value: string, canonical: string, field: string): string {
+	if (value !== canonical) {
+		throw new DomainError('non_canonical', `${field} must use its canonical form`, field);
+	}
+	return canonical;
+}
+
+function canonicalRequiredString(value: string, field: string, maximum: number): string {
+	return assertCanonical(value, requiredString(value, field, maximum), field);
+}
+
+function canonicalOptionalString(
+	value: string | undefined,
+	field: string,
+	maximum: number
+): string | undefined {
+	if (value === undefined) return undefined;
+	const normalized = optionalString(value, field, maximum);
+	if (normalized === undefined) {
+		throw new DomainError('non_canonical', `${field} must be omitted instead of empty`, field);
+	}
+	return assertCanonical(value, normalized, field);
+}
+
+function canonicalIsoUtc(value: string, field: string): string {
+	if (!normalizeWhitespace(value)) {
+		throw new DomainError('non_canonical', `${field} must be omitted instead of empty`, field);
+	}
+	return assertCanonical(value, isoUtc(value, field), field);
+}
+
+function canonicalEntityId(value: string, field = 'id'): string {
+	return canonicalRequiredString(value, field, FIELD_LIMITS.id);
+}
+
+function canonicalWorkspaceId(value: string): string {
+	return canonicalRequiredString(value, 'workspaceId', FIELD_LIMITS.workspaceId);
+}
+
 function uniqueById<T extends { readonly id: string }>(values: readonly T[]): Map<string, T> {
 	const result = new Map<string, T>();
 	for (const value of values) {
-		const id = entityId(value.id);
+		const id = canonicalEntityId(value.id);
 		if (result.has(id)) throw new DomainError('duplicate_id', `Duplicate id: ${id}`, 'id');
 		result.set(id, value);
 	}
@@ -124,38 +164,42 @@ function uniqueById<T extends { readonly id: string }>(values: readonly T[]): Ma
 }
 
 function assertWorkspace(actual: string, expected: string, field: string): void {
-	if (workspaceId(actual) !== expected) {
+	if (canonicalWorkspaceId(actual) !== expected) {
 		throw new DomainError('workspace_mismatch', `${field} belongs to another workspace`, field);
 	}
 }
 
 function relation<T>(map: ReadonlyMap<string, T>, id: string, field: string): T {
-	const related = map.get(entityId(id, field));
+	const related = map.get(canonicalEntityId(id, field));
 	if (!related) throw new DomainError('relation_not_found', `Missing relation: ${field}`, field);
 	return related;
 }
 
 function validateDecisionDates(decision: Decision): void {
-	const createdAt = isoUtc(decision.createdAt, 'createdAt');
-	const updatedAt = isoUtc(decision.updatedAt, 'updatedAt');
+	const createdAt = canonicalIsoUtc(decision.createdAt, 'createdAt');
+	const updatedAt = canonicalIsoUtc(decision.updatedAt, 'updatedAt');
 	assertChronology(createdAt, updatedAt);
+	const appliedAt =
+		decision.appliedAt === undefined ? undefined : canonicalIsoUtc(decision.appliedAt, 'appliedAt');
 	if (decision.status === 'applied') {
-		if (!decision.appliedAt) {
+		if (appliedAt === undefined) {
 			throw new DomainError(
 				'required',
 				'appliedAt is required for an applied decision',
 				'appliedAt'
 			);
 		}
-		const appliedAt = isoUtc(decision.appliedAt, 'appliedAt');
-		if (Date.parse(appliedAt) < Date.parse(createdAt)) {
+		if (
+			Date.parse(appliedAt) < Date.parse(createdAt) ||
+			Date.parse(appliedAt) > Date.parse(updatedAt)
+		) {
 			throw new DomainError(
 				'invalid_date_order',
-				'appliedAt cannot precede createdAt',
+				'appliedAt must be between createdAt and updatedAt',
 				'appliedAt'
 			);
 		}
-	} else if (decision.appliedAt) {
+	} else if (appliedAt !== undefined) {
 		throw new DomainError(
 			'invalid_status',
 			'Only applied decisions can have appliedAt',
@@ -164,8 +208,19 @@ function validateDecisionDates(decision: Decision): void {
 	}
 }
 
+export function validateDecision(decision: Decision): Decision {
+	canonicalEntityId(decision.id);
+	canonicalWorkspaceId(decision.workspaceId);
+	canonicalEntityId(decision.observationId, 'observationId');
+	canonicalOptionalString(decision.targetSessionId, 'targetSessionId', FIELD_LIMITS.id);
+	canonicalRequiredString(decision.text, 'text', FIELD_LIMITS.decisionText);
+	decisionStatus(decision.status);
+	validateDecisionDates(decision);
+	return decision;
+}
+
 export function validateWorkspaceSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
-	const activeWorkspace = workspaceId(snapshot.workspaceId);
+	const activeWorkspace = canonicalWorkspaceId(snapshot.workspaceId);
 	const courses = uniqueById(snapshot.courses);
 	const sessions = uniqueById(snapshot.sessions);
 	const observations = uniqueById(snapshot.observations);
@@ -173,24 +228,26 @@ export function validateWorkspaceSnapshot(snapshot: WorkspaceSnapshot): Workspac
 
 	for (const course of snapshot.courses) {
 		assertWorkspace(course.workspaceId, activeWorkspace, 'workspaceId');
-		requiredString(course.name, 'name', FIELD_LIMITS.courseName);
-		optionalString(course.subject, 'subject', FIELD_LIMITS.courseSubject);
-		requiredString(course.colorToken, 'colorToken', FIELD_LIMITS.colorToken);
-		const createdAt = isoUtc(course.createdAt, 'createdAt');
-		const updatedAt = isoUtc(course.updatedAt, 'updatedAt');
+		canonicalRequiredString(course.name, 'name', FIELD_LIMITS.courseName);
+		canonicalOptionalString(course.subject, 'subject', FIELD_LIMITS.courseSubject);
+		canonicalRequiredString(course.colorToken, 'colorToken', FIELD_LIMITS.colorToken);
+		const createdAt = canonicalIsoUtc(course.createdAt, 'createdAt');
+		const updatedAt = canonicalIsoUtc(course.updatedAt, 'updatedAt');
 		assertChronology(createdAt, updatedAt);
-		if (course.archivedAt) isoUtc(course.archivedAt, 'archivedAt');
+		if (course.archivedAt !== undefined) canonicalIsoUtc(course.archivedAt, 'archivedAt');
 	}
 
 	for (const session of snapshot.sessions) {
 		assertWorkspace(session.workspaceId, activeWorkspace, 'workspaceId');
 		const course = relation(courses, session.courseId, 'courseId');
 		assertWorkspace(course.workspaceId, session.workspaceId, 'courseId');
-		requiredString(session.title, 'title', FIELD_LIMITS.sessionTitle);
+		canonicalRequiredString(session.title, 'title', FIELD_LIMITS.sessionTitle);
 		sessionStatus(session.status);
-		if (session.scheduledFor) isoUtc(session.scheduledFor, 'scheduledFor');
-		const createdAt = isoUtc(session.createdAt, 'createdAt');
-		const updatedAt = isoUtc(session.updatedAt, 'updatedAt');
+		if (session.scheduledFor !== undefined) {
+			canonicalIsoUtc(session.scheduledFor, 'scheduledFor');
+		}
+		const createdAt = canonicalIsoUtc(session.createdAt, 'createdAt');
+		const updatedAt = canonicalIsoUtc(session.updatedAt, 'updatedAt');
 		assertChronology(createdAt, updatedAt);
 	}
 
@@ -199,20 +256,18 @@ export function validateWorkspaceSnapshot(snapshot: WorkspaceSnapshot): Workspac
 		const session = relation(sessions, observation.sessionId, 'sessionId');
 		assertWorkspace(session.workspaceId, observation.workspaceId, 'sessionId');
 		observationSignal(observation.signal);
-		requiredString(observation.note, 'note', FIELD_LIMITS.observationNote);
-		const createdAt = isoUtc(observation.createdAt, 'createdAt');
-		const updatedAt = isoUtc(observation.updatedAt, 'updatedAt');
+		canonicalRequiredString(observation.note, 'note', FIELD_LIMITS.observationNote);
+		const createdAt = canonicalIsoUtc(observation.createdAt, 'createdAt');
+		const updatedAt = canonicalIsoUtc(observation.updatedAt, 'updatedAt');
 		assertChronology(createdAt, updatedAt);
 	}
 
 	for (const decision of snapshot.decisions) {
+		validateDecision(decision);
 		assertWorkspace(decision.workspaceId, activeWorkspace, 'workspaceId');
 		const observation = relation(observations, decision.observationId, 'observationId');
 		assertWorkspace(observation.workspaceId, decision.workspaceId, 'observationId');
-		requiredString(decision.text, 'text', FIELD_LIMITS.decisionText);
-		decisionStatus(decision.status);
-		validateDecisionDates(decision);
-		if (decision.targetSessionId) {
+		if (decision.targetSessionId !== undefined) {
 			const target = relation(sessions, decision.targetSessionId, 'targetSessionId');
 			assertWorkspace(target.workspaceId, decision.workspaceId, 'targetSessionId');
 			if (

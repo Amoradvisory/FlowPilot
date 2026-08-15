@@ -8,6 +8,7 @@ import {
 	optionalString,
 	requiredString,
 	sessionStatus,
+	validateDecision,
 	validateWorkspaceSnapshot,
 	workspaceId
 } from './invariants';
@@ -116,6 +117,7 @@ export function updateDecisionStatus(
 	nextStatus: DecisionStatus,
 	clock: Clock = systemClock
 ): Decision {
+	validateDecision(decision);
 	decisionStatus(nextStatus);
 	const expected: Partial<Record<DecisionStatus, DecisionStatus>> = {
 		to_prepare: 'ready',
@@ -133,12 +135,13 @@ export function updateDecisionStatus(
 	if (Date.parse(now) < Date.parse(isoUtc(decision.updatedAt, 'updatedAt'))) {
 		throw new DomainError('invalid_date_order', 'now cannot precede updatedAt', 'now');
 	}
-	return {
+	const updated: Decision = {
 		...decision,
 		status: nextStatus,
 		...(nextStatus === 'applied' ? { appliedAt: now } : {}),
 		updatedAt: now
 	};
+	return validateDecision(updated);
 }
 
 function emptyDeletionSet() {
@@ -146,7 +149,11 @@ function emptyDeletionSet() {
 }
 
 function sorted(values: Iterable<string>): string[] {
-	return [...values].sort((left, right) => left.localeCompare(right));
+	return [...values].sort(compareOrdinal);
+}
+
+function compareOrdinal(left: string, right: string): number {
+	return left < right ? -1 : left > right ? 1 : 0;
 }
 
 export function planObservationDeletion(

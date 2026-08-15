@@ -8,7 +8,11 @@ import type {
 } from './types';
 
 function byId<T extends { readonly id: string }>(left: T, right: T): number {
-	return left.id.localeCompare(right.id);
+	return compareOrdinal(left.id, right.id);
+}
+
+function compareOrdinal(left: string, right: string): number {
+	return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function actionable(decision: Decision): boolean {
@@ -26,11 +30,11 @@ export function selectToday(snapshot: WorkspaceSnapshot, now: Date): TodaySelect
 				session.scheduledFor >= nowIso
 		)
 		.sort((left, right) => {
-			const dateOrder = left.scheduledFor!.localeCompare(right.scheduledFor!);
+			const dateOrder = compareOrdinal(left.scheduledFor!, right.scheduledFor!);
 			return dateOrder || byId(left, right);
 		})[0];
 	const decisionOrder = (left: Decision, right: Decision) => {
-		const dateOrder = left.createdAt.localeCompare(right.createdAt);
+		const dateOrder = compareOrdinal(left.createdAt, right.createdAt);
 		return dateOrder || byId(left, right);
 	};
 
@@ -77,7 +81,7 @@ export function selectMemory(
 			return decisions.map((decision) => ({ course, session, observation, decision }));
 		})
 		.sort((left, right) => {
-			const dateOrder = right.observation.createdAt.localeCompare(left.observation.createdAt);
+			const dateOrder = compareOrdinal(right.observation.createdAt, left.observation.createdAt);
 			return dateOrder || byId(left.observation, right.observation);
 		});
 }

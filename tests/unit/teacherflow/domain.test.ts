@@ -409,6 +409,42 @@ describe('TeacherFlow domain commands', () => {
 			'now'
 		);
 	});
+
+	it('rejects a malformed incoming decision before evaluating its transition', () => {
+		const base = makeSnapshot().decisions[1];
+		for (const decision of [
+			{ ...base, id: ' decision ' },
+			{ ...base, workspaceId: ' personal ' },
+			{ ...base, text: '   ' }
+		]) {
+			expectDomainError(
+				() => updateDecisionStatus(decision, 'ready', clock),
+				decision.text.trim() ? 'non_canonical' : 'required'
+			);
+		}
+	});
+
+	it('rejects an incoming non-applied decision carrying appliedAt', () => {
+		const decision: Decision = { ...makeSnapshot().decisions[1], appliedAt: NOW };
+		expectDomainError(
+			() => updateDecisionStatus(decision, 'ready', clock),
+			'invalid_status',
+			'appliedAt'
+		);
+	});
+
+	it('rejects an incoming decision whose updatedAt precedes createdAt', () => {
+		const decision: Decision = {
+			...makeSnapshot().decisions[1],
+			createdAt: '2026-08-15T08:00:00.000Z',
+			updatedAt: '2026-08-15T07:00:00.000Z'
+		};
+		expectDomainError(
+			() => updateDecisionStatus(decision, 'ready', clock),
+			'invalid_date_order',
+			'updatedAt'
+		);
+	});
 });
 
 describe('TeacherFlow relationship invariants and deletion intents', () => {
@@ -511,6 +547,140 @@ describe('TeacherFlow relationship invariants and deletion intents', () => {
 		);
 	});
 
+	it('rejects non-canonical required values before they can desynchronize relations', () => {
+		const snapshot = makeSnapshot();
+		expectDomainError(
+			() =>
+				validateWorkspaceSnapshot({
+					...snapshot,
+					sessions: snapshot.sessions.map((session) =>
+						session.id === 'session-next' ? { ...session, id: ' session-next ' } : session
+					)
+				}),
+			'non_canonical',
+			'id'
+		);
+		expectDomainError(
+			() =>
+				validateWorkspaceSnapshot({
+					...snapshot,
+					courses: snapshot.courses.map((course) =>
+						course.id === 'course-maths' ? { ...course, name: ' Mathématiques ' } : course
+					)
+				}),
+			'non_canonical',
+			'name'
+		);
+	});
+
+	it.each([
+		[
+			'course subject',
+			(snapshot: WorkspaceSnapshot) => ({
+				...snapshot,
+				courses: snapshot.courses.map((course) =>
+					course.id === 'course-maths' ? { ...course, subject: '' } : course
+				)
+			})
+		],
+		[
+			'course archivedAt',
+			(snapshot: WorkspaceSnapshot) => ({
+				...snapshot,
+				courses: snapshot.courses.map((course) =>
+					course.id === 'course-maths' ? { ...course, archivedAt: '' } : course
+				)
+			})
+		],
+		[
+			'session scheduledFor',
+			(snapshot: WorkspaceSnapshot) => ({
+				...snapshot,
+				sessions: snapshot.sessions.map((session) =>
+					session.id === 'session-undated' ? { ...session, scheduledFor: '' } : session
+				)
+			})
+		],
+		[
+			'decision targetSessionId',
+			(snapshot: WorkspaceSnapshot) => ({
+				...snapshot,
+				decisions: snapshot.decisions.map((decision) =>
+					decision.id === 'decision-unscheduled' ? { ...decision, targetSessionId: '' } : decision
+				)
+			})
+		],
+		[
+			'decision appliedAt',
+			(snapshot: WorkspaceSnapshot) => ({
+				...snapshot,
+				decisions: snapshot.decisions.map((decision) =>
+					decision.id === 'decision-unscheduled' ? { ...decision, appliedAt: '' } : decision
+				)
+			})
+		]
+	] as const)('rejects an empty but present optional %s', (_label, mutate) => {
+		expectDomainError(() => validateWorkspaceSnapshot(mutate(makeSnapshot())), 'non_canonical');
+	});
+
+	it('rejects valid instants that are not stored in canonical UTC form', () => {
+		const snapshot = makeSnapshot();
+		expectDomainError(
+			() =>
+				validateWorkspaceSnapshot({
+					...snapshot,
+					sessions: snapshot.sessions.map((session) =>
+						session.id === 'session-next'
+							? { ...session, scheduledFor: '2026-08-16T11:00:00+02:00' }
+							: session
+					)
+				}),
+			'non_canonical',
+			'scheduledFor'
+		);
+	});
+
+	it('enforces createdAt <= appliedAt <= updatedAt with inclusive boundaries', () => {
+		const snapshot = makeSnapshot();
+		const base: Decision = {
+			...snapshot.decisions[1],
+			updatedAt: '2026-08-15T08:00:00.000Z'
+		};
+		const atLowerBound: Decision = {
+			...base,
+			status: 'applied',
+			appliedAt: base.createdAt
+		};
+		const atUpperBound: Decision = {
+			...base,
+			status: 'applied',
+			appliedAt: base.updatedAt
+		};
+		expect(
+			validateWorkspaceSnapshot({ ...snapshot, decisions: [snapshot.decisions[0], atLowerBound] })
+		).toBeTruthy();
+		expect(
+			validateWorkspaceSnapshot({ ...snapshot, decisions: [snapshot.decisions[0], atUpperBound] })
+		).toBeTruthy();
+
+		expectDomainError(
+			() =>
+				validateWorkspaceSnapshot({
+					...snapshot,
+					decisions: [
+						snapshot.decisions[0],
+						{
+							...base,
+							status: 'applied',
+							appliedAt: '2026-08-15T08:01:00.000Z'
+						}
+					]
+				}),
+			'invalid_date_order',
+			'appliedAt'
+		);
+	});
+
 	it('plans observation deletion with its decisions without mutating the snapshot', () => {
 		const snapshot = makeSnapshot();
 		const before = structuredClone(snapshot);
@@ -590,7 +760,7 @@ describe('TeacherFlow selectors', () => {
 			...snapshot.decisions[1],
 			id: 'decision-applied',
 			status: 'applied',
-			appliedAt: NOW
+			appliedAt: snapshot.decisions[1].updatedAt
 		};
 		const result = selectToday(
 			{
@@ -639,5 +809,38 @@ describe('TeacherFlow selectors', () => {
 			'invalid_date',
 			'now'
 		);
+	});
+
+	it('rejects a non-canonical snapshot instead of deriving views from mismatched keys', () => {
+		const snapshot = makeSnapshot();
+		const invalid: WorkspaceSnapshot = {
+			...snapshot,
+			sessions: snapshot.sessions.map((session) =>
+				session.id === 'session-next' ? { ...session, id: ' session-next ' } : session
+			)
+		};
+
+		expectDomainError(() => selectToday(invalid, new Date(NOW)), 'non_canonical', 'id');
+		expectDomainError(() => selectMemory(invalid, {}), 'non_canonical', 'id');
+	});
+
+	it('uses ordinal id tie-breakers that are independent from the host locale', () => {
+		const snapshot = makeSnapshot();
+		const next = snapshot.sessions.find(({ id }) => id === 'session-next')!;
+		const sessions = snapshot.sessions.filter(({ id }) => id !== 'session-next');
+		const result = selectToday(
+			{
+				...snapshot,
+				sessions: [...sessions, { ...next, id: 'é' }, { ...next, id: 'z' }],
+				decisions: snapshot.decisions.map((decision) =>
+					decision.targetSessionId === 'session-next'
+						? { ...decision, targetSessionId: 'z' }
+						: decision
+				)
+			},
+			new Date(NOW)
+		);
+
+		expect(result.nextSession?.id).toBe('z');
 	});
 });
