@@ -25,6 +25,7 @@ export interface TeacherFlowRepository {
 	load(): Promise<WorkspaceSnapshot>;
 	putCourse(course: Course): Promise<void>;
 	putSession(session: Session): Promise<void>;
+	putObservation(observation: Observation): Promise<void>;
 	putObservationWithDecision(observation: Observation, decision?: Decision): Promise<void>;
 	putDecision(decision: Decision): Promise<void>;
 	deleteObservation(observationId: EntityId): Promise<void>;
@@ -80,6 +81,18 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 
 	async putSession(session: Session): Promise<void> {
 		await this.replaceEntity(['sessions', session]);
+	}
+
+	async putObservation(observation: Observation): Promise<void> {
+		this.assertWorkspace(observation.workspaceId);
+		await this.write(async (snapshot) => {
+			const next: WorkspaceSnapshot = {
+				...snapshot,
+				observations: replace(snapshot.observations, observation)
+			};
+			validateWorkspaceSnapshot(next);
+			await this.database.observations.put(observation);
+		});
 	}
 
 	async putDecision(decision: Decision): Promise<void> {

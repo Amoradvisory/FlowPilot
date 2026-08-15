@@ -33,6 +33,15 @@ function repository(workspaceId: string, snapshot = empty(workspaceId)): Teacher
 				sessions: [...current.sessions.filter(({ id }) => id !== session.id), session]
 			};
 		},
+		putObservation: async (observation) => {
+			current = {
+				...current,
+				observations: [
+					...current.observations.filter(({ id }) => id !== observation.id),
+					observation
+				]
+			};
+		},
 		putObservationWithDecision: async (observation, decision) => {
 			current = {
 				...current,

@@ -167,6 +167,34 @@ export function createObservation(
 	};
 }
 
+export function updateObservation(
+	observation: Observation,
+	draft: ObservationDraft,
+	clock: Clock = systemClock
+): Observation {
+	const activeWorkspace = workspaceId(draft.workspaceId);
+	if (observation.workspaceId !== activeWorkspace) {
+		throw new DomainError(
+			'workspace_mismatch',
+			'Observation belongs to another workspace',
+			'workspaceId'
+		);
+	}
+	const now = timestamp(clock);
+	if (Date.parse(now) < Date.parse(isoUtc(observation.updatedAt, 'updatedAt'))) {
+		throw new DomainError('invalid_date_order', 'now cannot precede updatedAt', 'now');
+	}
+	return {
+		id: entityId(observation.id),
+		workspaceId: activeWorkspace,
+		sessionId: entityId(draft.sessionId, 'sessionId'),
+		signal: observationSignal(draft.signal),
+		note: requiredString(draft.note, 'note', FIELD_LIMITS.observationNote),
+		createdAt: isoUtc(observation.createdAt, 'createdAt'),
+		updatedAt: now
+	};
+}
+
 export function createDecision(
 	draft: DecisionDraft,
 	clock: Clock = systemClock,
@@ -216,6 +244,23 @@ export function updateDecisionStatus(
 		updatedAt: now
 	};
 	return validateDecision(updated);
+}
+
+export function updateDecisionText(
+	decision: Decision,
+	text: string,
+	clock: Clock = systemClock
+): Decision {
+	validateDecision(decision);
+	const now = timestamp(clock);
+	if (Date.parse(now) < Date.parse(isoUtc(decision.updatedAt, 'updatedAt'))) {
+		throw new DomainError('invalid_date_order', 'now cannot precede updatedAt', 'now');
+	}
+	return validateDecision({
+		...decision,
+		text: requiredString(text, 'text', FIELD_LIMITS.decisionText),
+		updatedAt: now
+	});
 }
 
 function emptyDeletionSet() {
