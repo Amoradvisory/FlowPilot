@@ -154,6 +154,40 @@ describe('TeacherFlowRepository', () => {
 		});
 	});
 
+	it('keeps a pre-import recovery backup and rolls back byte-for-byte if importing fails', async () => {
+		const name = databaseName();
+		const repo = await openTeacherFlowRepository('personal', {
+			databaseName: name,
+			migrateLegacy: false
+		});
+		await repo.putCourse(course());
+		const before = await repo.load();
+		const invalid: WorkspaceSnapshot = {
+			...before,
+			sessions: [{ ...session(), courseId: 'missing' }]
+		};
+		await expect(repo.importPersonalWorkspace(invalid, '1.0.0')).rejects.toMatchObject({
+			code: 'relation_not_found'
+		});
+		expect(await repo.load()).toEqual(before);
+
+		await repo.importPersonalWorkspace(
+			{ workspaceId: 'personal', courses: [], sessions: [], observations: [], decisions: [] },
+			'1.0.0'
+		);
+		const database = new (
+			await import('../../../src/lib/teacherflow/data/database')
+		).TeacherFlowDatabase(name);
+		await database.open();
+		const recovery = await database.recoveryBackups
+			.where('workspaceId')
+			.equals('personal')
+			.toArray();
+		expect(recovery).toHaveLength(1);
+		expect(JSON.parse(recovery[0]!.raw)).toEqual(before);
+		await database.close();
+	});
+
 	it('clears observations with their decisions, preserves external decisions by clearing their target, and reset prevents legacy reimport', async () => {
 		const name = databaseName();
 		const storage = {

@@ -17,7 +17,22 @@
 	let decisionText = $state('');
 	let deleting = $state<Observation>();
 	let chronology = $state<HTMLElement>();
+	let busy = $state(false);
 	const entries = $derived(teacherFlow.memory(filters));
+	const groups = $derived.by(() => {
+		const indexed = new Map<string, { course: string; session: string; entries: typeof entries }>();
+		for (const entry of entries) {
+			const key = `${entry.course.id}:${entry.session.id}`;
+			const group = indexed.get(key) ?? {
+				course: entry.course.name,
+				session: entry.session.title,
+				entries: []
+			};
+			group.entries.push(entry);
+			indexed.set(key, group);
+		}
+		return [...indexed.values()];
+	});
 
 	function beginEdit(observation: Observation, decision?: Decision) {
 		editing = observation;
@@ -26,26 +41,37 @@
 	}
 
 	async function saveEdit(decision?: Decision) {
-		if (!editing) return;
-		await teacherFlow.saveObservation(
+		if (!editing || busy) return;
+		busy = true;
+		const saved = await teacherFlow.editObservationWithDecision(
 			{
 				workspaceId: teacherFlow.workspaceId,
 				sessionId: editing.sessionId,
 				signal: editing.signal,
 				note
 			},
-			editing
+			editing,
+			decision,
+			decisionText
 		);
-		if (decision && decisionText !== decision.text)
-			await teacherFlow.editDecisionText(decision, decisionText);
-		editing = undefined;
+		busy = false;
+		if (saved) editing = undefined;
 	}
 
 	async function confirmDelete() {
-		if (!deleting) return;
+		if (!deleting || busy) return;
+		busy = true;
 		await teacherFlow.deleteObservation(deleting.id);
+		busy = false;
 		deleting = undefined;
 		chronology?.focus();
+	}
+
+	async function advance(decision: Decision) {
+		if (busy) return;
+		busy = true;
+		await teacherFlow.advanceDecision(decision);
+		busy = false;
 	}
 </script>
 
@@ -80,75 +106,87 @@
 			aria-label="Chronologie pédagogique"
 			tabindex="-1"
 		>
-			{#each entries as entry (entry.decision?.id ?? entry.observation.id)}
-				<article class="memory-entry">
-					<p class="card-kicker">{entry.course.name} · {entry.session.title}</p>
-					<h2>
-						{entry.observation.signal === 'keep'
-							? 'À conserver'
-							: entry.observation.signal === 'adjust'
-								? 'À ajuster'
-								: 'À vérifier'}
-					</h2>
-					<p>{entry.observation.note}</p>
-					{#if entry.decision}
-						<p class="memory-decision">
-							<strong>Décision · {entry.decision.status}</strong><br />{entry.decision.text}
-						</p>
-					{/if}
-					<div class="form-actions">
-						<button
-							class="button button--quiet"
-							type="button"
-							onclick={() => beginEdit(entry.observation, entry.decision)}>Modifier</button
-						>
-						{#if entry.decision && entry.decision.status !== 'applied'}
-							<button
-								class="button button--secondary"
-								type="button"
-								onclick={() => teacherFlow.advanceDecision(entry.decision!)}
-								>{entry.decision.status === 'to_prepare'
-									? 'Marquer prête'
-									: 'Marquer appliquée'}</button
-							>
-						{/if}
-						<button
-							class="button button--quiet"
-							type="button"
-							onclick={() => (deleting = entry.observation)}>Supprimer</button
-						>
-					</div>
-					{#if editing?.id === entry.observation.id}
-						<form
-							class="memory-edit"
-							onsubmit={(event) => {
-								event.preventDefault();
-								void saveEdit(entry.decision);
-							}}
-						>
-							<label>Note <textarea bind:value={note} maxlength="600" required></textarea></label>
-							{#if entry.decision}<label
-									>Décision <textarea bind:value={decisionText} maxlength="300" required
-									></textarea></label
-								>{/if}
+			{#each groups as group (`${group.course}:${group.session}`)}
+				<section class="memory-group" aria-label={`${group.course} — ${group.session}`}>
+					<h2>{group.course}</h2>
+					<h3>{group.session}</h3>
+					{#each group.entries as entry (entry.decision?.id ?? entry.observation.id)}
+						<article class="memory-entry">
+							<p class="card-kicker">{entry.course.name} · {entry.session.title}</p>
+							<h2>
+								{entry.observation.signal === 'keep'
+									? 'À conserver'
+									: entry.observation.signal === 'adjust'
+										? 'À ajuster'
+										: 'À vérifier'}
+							</h2>
+							<p>{entry.observation.note}</p>
+							{#if entry.decision}
+								<p class="memory-decision">
+									<strong>Décision · {entry.decision.status}</strong><br />{entry.decision.text}
+								</p>
+							{/if}
 							<div class="form-actions">
-								<button class="button button--primary" type="submit"
-									>Enregistrer les modifications</button
-								><button
+								<button
 									class="button button--quiet"
 									type="button"
-									onclick={() => (editing = undefined)}>Annuler</button
+									disabled={busy}
+									onclick={() => beginEdit(entry.observation, entry.decision)}>Modifier</button
+								>
+								{#if entry.decision && entry.decision.status !== 'applied'}
+									<button
+										class="button button--secondary"
+										type="button"
+										disabled={busy}
+										onclick={() => advance(entry.decision!)}
+										>{entry.decision.status === 'to_prepare'
+											? 'Marquer prête'
+											: 'Marquer appliquée'}</button
+									>
+								{/if}
+								<button
+									class="button button--quiet"
+									type="button"
+									disabled={busy}
+									onclick={() => (deleting = entry.observation)}>Supprimer</button
 								>
 							</div>
-						</form>
-					{/if}
-				</article>
+							{#if editing?.id === entry.observation.id}
+								<form
+									class="memory-edit"
+									onsubmit={(event) => {
+										event.preventDefault();
+										void saveEdit(entry.decision);
+									}}
+								>
+									<label
+										>Note <textarea bind:value={note} maxlength="600" required></textarea></label
+									>
+									{#if entry.decision}<label
+											>Décision <textarea bind:value={decisionText} maxlength="300" required
+											></textarea></label
+										>{/if}
+									<div class="form-actions">
+										<button class="button button--primary" type="submit" disabled={busy}
+											>Enregistrer les modifications</button
+										><button
+											class="button button--quiet"
+											type="button"
+											onclick={() => (editing = undefined)}>Annuler</button
+										>
+									</div>
+								</form>
+							{/if}
+						</article>
+					{/each}
+				</section>
 			{/each}
 		</section>
 	{/if}
 </div>
 
 <ConfirmDialog
+	id="memory-delete-observation"
 	open={deleting !== undefined}
 	title="Supprimer cette observation ?"
 	description={deleting

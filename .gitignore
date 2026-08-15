@@ -19,6 +19,7 @@ test-results/
 /tmp
 /output
 /.worktrees/
+.superpowers/sdd/
 
 # Env
 .env

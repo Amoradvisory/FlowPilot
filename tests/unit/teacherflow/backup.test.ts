@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	exportWorkspace,
 	parseTeacherFlowBackup,
+	serializeTeacherFlowBackup,
 	TEACHERFLOW_BACKUP_MAX_BYTES
 } from '../../../src/lib/teacherflow/data/backup';
 import type { WorkspaceSnapshot } from '../../../src/lib/teacherflow/domain/types';
@@ -103,5 +104,45 @@ describe('TeacherFlow personal backup', () => {
 				})
 			)
 		).toMatchObject({ ok: false });
+	});
+
+	it('rejects unknown or dangerous nested keys and does not mutate the snapshot while serializing', () => {
+		const snapshot = personalSnapshot();
+		const before = structuredClone(snapshot);
+		const backup = exportWorkspace(snapshot, '1');
+		const withUnknownCourseKey = JSON.stringify({
+			...backup,
+			courses: [{ ...backup.courses[0], unexpected: true }]
+		});
+		const withPrototypeKey = JSON.stringify({
+			...backup,
+			observations: [{ ...backup.observations[0], constructor: 'poison' }]
+		});
+
+		expect(parseTeacherFlowBackup(withUnknownCourseKey)).toMatchObject({
+			ok: false,
+			reason: 'invalid_structure'
+		});
+		expect(parseTeacherFlowBackup(withPrototypeKey)).toMatchObject({
+			ok: false,
+			reason: 'unsafe_key'
+		});
+		expect(snapshot).toEqual(before);
+	});
+
+	it('refuses to serialize a valid but oversized backup before it can be downloaded', () => {
+		const snapshot = personalSnapshot();
+		const observations = Array.from({ length: 1800 }, (_, index) => ({
+			...snapshot.observations[0],
+			id: `observation-${index}`,
+			note: 'x'.repeat(600)
+		}));
+		const decisions = observations.map((observation, index) => ({
+			...snapshot.decisions[0],
+			id: `decision-${index}`,
+			observationId: observation.id
+		}));
+		const backup = exportWorkspace({ ...snapshot, observations, decisions }, '1');
+		expect(() => serializeTeacherFlowBackup(backup)).toThrow(/maximum/u);
 	});
 });

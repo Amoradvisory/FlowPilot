@@ -1,15 +1,25 @@
 import { DomainError, validateWorkspaceSnapshot } from '../domain/invariants';
-import { planCourseDeletion, planObservationDeletion } from '../domain/commands';
+import {
+	planCourseDeletion,
+	planObservationDeletion,
+	planSessionDeletion,
+	updateDecisionStatus,
+	updateDecisionText,
+	updateObservation
+} from '../domain/commands';
 import type {
 	Course,
 	Decision,
+	DecisionStatus,
 	EntityId,
 	Observation,
+	ObservationDraft,
 	Session,
 	WorkspaceId,
 	WorkspaceSnapshot
 } from '../domain/types';
 import { TeacherFlowDatabase } from './database';
+import { BackupError, TEACHERFLOW_BACKUP_MAX_BYTES } from './backup';
 import { InvalidStoredData, mapStorageError } from './errors';
 import {
 	LEGACY_SOURCES,
@@ -26,14 +36,47 @@ export interface TeacherFlowRepository {
 	putCourse(course: Course): Promise<void>;
 	putSession(session: Session): Promise<void>;
 	putObservation(observation: Observation): Promise<void>;
+	editObservationWithDecision(
+		input: ObservationDecisionEdit
+	): Promise<ObservationDecisionEditResult>;
+	advanceDecision(input: DecisionStatusAdvance): Promise<Decision>;
 	putObservationWithDecision(observation: Observation, decision?: Decision): Promise<void>;
 	putDecision(decision: Decision): Promise<void>;
 	deleteObservation(observationId: EntityId): Promise<void>;
+	deleteSession(sessionId: EntityId): Promise<void>;
 	deleteCourse(courseId: EntityId): Promise<void>;
 	replaceWorkspace(snapshot: WorkspaceSnapshot): Promise<void>;
+	/** Validates first, then writes a recoverable pre-import copy and replacement in one transaction. */
+	importPersonalWorkspace(snapshot: WorkspaceSnapshot, appVersion: string): Promise<void>;
+	lastPersonalExportedAt(): Promise<string | undefined>;
+	markPersonalExportedAt(exportedAt: string): Promise<void>;
 	clearWorkspace(): Promise<void>;
 	/** Atomically seeds only a new demo workspace; a durable marker makes this idempotent. */
 	ensureDemoSeed(snapshot: WorkspaceSnapshot): Promise<void>;
+}
+
+export interface ObservationDecisionEdit {
+	readonly observationId: EntityId;
+	readonly expectedObservationUpdatedAt: string;
+	readonly observation: ObservationDraft;
+	readonly decision?: {
+		readonly id: EntityId;
+		readonly expectedUpdatedAt: string;
+		readonly text: string;
+	};
+	readonly now: () => Date;
+}
+
+export interface ObservationDecisionEditResult {
+	readonly observation: Observation;
+	readonly decision?: Decision;
+}
+
+export interface DecisionStatusAdvance {
+	readonly decisionId: EntityId;
+	readonly expectedUpdatedAt: string;
+	readonly nextStatus: DecisionStatus;
+	readonly now: () => Date;
 }
 
 export interface OpenTeacherFlowRepositoryOptions {
@@ -95,6 +138,80 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 		});
 	}
 
+	async editObservationWithDecision(
+		input: ObservationDecisionEdit
+	): Promise<ObservationDecisionEditResult> {
+		let result: ObservationDecisionEditResult | undefined;
+		await this.write(async (snapshot) => {
+			const currentObservation = snapshot.observations.find(({ id }) => id === input.observationId);
+			if (
+				!currentObservation ||
+				currentObservation.updatedAt !== input.expectedObservationUpdatedAt
+			) {
+				throw new DomainError(
+					'invalid_transition',
+					'Observation has changed; reload before editing',
+					'updatedAt'
+				);
+			}
+			const observation = updateObservation(
+				currentObservation,
+				{ ...input.observation, workspaceId: this.workspaceId },
+				input.now
+			);
+			let decision: Decision | undefined;
+			if (input.decision) {
+				const currentDecision = snapshot.decisions.find(({ id }) => id === input.decision!.id);
+				if (
+					!currentDecision ||
+					currentDecision.observationId !== currentObservation.id ||
+					currentDecision.updatedAt !== input.decision.expectedUpdatedAt
+				) {
+					throw new DomainError(
+						'invalid_transition',
+						'Decision has changed; reload before editing',
+						'updatedAt'
+					);
+				}
+				decision = updateDecisionText(currentDecision, input.decision.text, input.now);
+			}
+			const next: WorkspaceSnapshot = {
+				...snapshot,
+				observations: replace(snapshot.observations, observation),
+				decisions: decision ? replace(snapshot.decisions, decision) : snapshot.decisions
+			};
+			validateWorkspaceSnapshot(next);
+			await this.database.observations.put(observation);
+			await this.afterLinkedWrite?.();
+			if (decision) await this.database.decisions.put(decision);
+			result = decision ? { observation, decision } : { observation };
+		});
+		return result!;
+	}
+
+	async advanceDecision(input: DecisionStatusAdvance): Promise<Decision> {
+		let result: Decision | undefined;
+		await this.write(async (snapshot) => {
+			const current = snapshot.decisions.find(({ id }) => id === input.decisionId);
+			if (!current || current.updatedAt !== input.expectedUpdatedAt) {
+				throw new DomainError(
+					'invalid_transition',
+					'Decision has changed; reload before advancing',
+					'updatedAt'
+				);
+			}
+			const decision = updateDecisionStatus(current, input.nextStatus, input.now);
+			const next: WorkspaceSnapshot = {
+				...snapshot,
+				decisions: replace(snapshot.decisions, decision)
+			};
+			validateWorkspaceSnapshot(next);
+			await this.database.decisions.put(decision);
+			result = decision;
+		});
+		return result!;
+	}
+
 	async putDecision(decision: Decision): Promise<void> {
 		await this.replaceEntity(['decisions', decision]);
 	}
@@ -132,6 +249,26 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 		});
 	}
 
+	async deleteSession(sessionId: EntityId): Promise<void> {
+		await this.write(async (snapshot) => {
+			const intent = planSessionDeletion(snapshot, sessionId);
+			await this.database.sessions.bulkDelete(
+				intent.delete.sessionIds.map((id) => [this.workspaceId, id])
+			);
+			await this.database.observations.bulkDelete(
+				intent.delete.observationIds.map((id) => [this.workspaceId, id])
+			);
+			await this.database.decisions.bulkDelete(
+				intent.delete.decisionIds.map((id) => [this.workspaceId, id])
+			);
+			for (const decisionId of intent.clearDecisionTargetIds) {
+				const decision = snapshot.decisions.find(({ id }) => id === decisionId)!;
+				const { targetSessionId: _targetSessionId, ...cleared } = decision;
+				await this.database.decisions.put(cleared);
+			}
+		});
+	}
+
 	async deleteCourse(courseId: EntityId): Promise<void> {
 		await this.write(async (snapshot) => {
 			const intent = planCourseDeletion(snapshot, courseId);
@@ -164,6 +301,68 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 			await this.database.sessions.bulkPut(snapshot.sessions);
 			await this.database.observations.bulkPut(snapshot.observations);
 			await this.database.decisions.bulkPut(snapshot.decisions);
+		});
+	}
+
+	async importPersonalWorkspace(snapshot: WorkspaceSnapshot, appVersion: string): Promise<void> {
+		if (this.workspaceId !== 'personal' || snapshot.workspaceId !== 'personal') {
+			throw new DomainError(
+				'workspace_mismatch',
+				'Only personal data can be imported',
+				'workspaceId'
+			);
+		}
+		validateWorkspaceSnapshot(snapshot);
+		if (!appVersion.trim())
+			throw new DomainError('required', 'appVersion is required', 'appVersion');
+		await this.write(async (current) => {
+			const raw = JSON.stringify(current);
+			if (new TextEncoder().encode(raw).byteLength > TEACHERFLOW_BACKUP_MAX_BYTES) {
+				throw new BackupError(
+					'too_large',
+					'La sauvegarde de récupération dépasse la taille maximale de 1 Mo.'
+				);
+			}
+			const createdAt = new Date().toISOString();
+			await this.database.recoveryBackups.add({
+				workspaceId: this.workspaceId,
+				migrationId: `pre-import-${createdAt}-${crypto.randomUUID()}`,
+				raw,
+				truncated: false,
+				createdAt
+			});
+			await this.removeWorkspace();
+			await this.database.courses.bulkPut(snapshot.courses);
+			await this.database.sessions.bulkPut(snapshot.sessions);
+			await this.database.observations.bulkPut(snapshot.observations);
+			await this.database.decisions.bulkPut(snapshot.decisions);
+		});
+	}
+
+	async lastPersonalExportedAt(): Promise<string | undefined> {
+		if (this.workspaceId !== 'personal') return undefined;
+		const record = await this.database.meta.get([this.workspaceId, 'last-personal-export']);
+		return typeof record?.value === 'string' ? record.value : undefined;
+	}
+
+	async markPersonalExportedAt(exportedAt: string): Promise<void> {
+		if (this.workspaceId !== 'personal') {
+			throw new DomainError(
+				'workspace_mismatch',
+				'Only personal exports can be recorded',
+				'workspaceId'
+			);
+		}
+		const canonical = new Date(exportedAt).toISOString();
+		if (canonical !== exportedAt)
+			throw new DomainError('invalid_date', 'exportedAt must be a valid date', 'exportedAt');
+		await this.write(async () => {
+			await this.database.meta.put({
+				workspaceId: this.workspaceId,
+				key: 'last-personal-export',
+				value: exportedAt,
+				updatedAt: exportedAt
+			});
 		});
 	}
 
@@ -268,7 +467,7 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 				async () => operation(await this.read())
 			);
 		} catch (error) {
-			if (error instanceof DomainError) throw error;
+			if (error instanceof DomainError || error instanceof BackupError) throw error;
 			throw mapStorageError(error);
 		}
 	}

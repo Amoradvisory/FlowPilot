@@ -4,10 +4,13 @@
 	import {
 		exportWorkspace,
 		parseTeacherFlowBackup,
+		serializeTeacherFlowBackup,
+		TEACHERFLOW_BACKUP_MAX_BYTES,
 		type TeacherFlowBackup
 	} from '$lib/teacherflow/data/backup';
 	import { DEMO_WORKSPACE_ID, PERSONAL_WORKSPACE_ID } from '$lib/teacherflow/demo/seed';
 	import { getTeacherFlowState } from '$lib/teacherflow/state/context';
+	import { TEACHERFLOW_APP_VERSION } from '$lib/teacherflow/version';
 
 	const teacherFlow = getTeacherFlowState();
 	let preview = $state<TeacherFlowBackup>();
@@ -21,13 +24,14 @@
 
 	function download() {
 		try {
-			const backup = exportWorkspace(teacherFlow.snapshot, '0.0.1');
-			const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+			const backup = exportWorkspace(teacherFlow.snapshot, TEACHERFLOW_APP_VERSION);
+			const blob = new Blob([serializeTeacherFlowBackup(backup)], { type: 'application/json' });
 			const href = URL.createObjectURL(blob);
 			const link = document.createElement('a');
 			link.href = href;
 			link.download = `teacherflow-backup-${backup.exportedAt.slice(0, 10)}.json`;
 			link.click();
+			void teacherFlow.markPersonalExportedAt(backup.exportedAt);
 			setTimeout(() => URL.revokeObjectURL(href), 0);
 		} catch {
 			importError =
@@ -40,7 +44,17 @@
 		preview = undefined;
 		importError = undefined;
 		if (!file) return;
-		const parsed = parseTeacherFlowBackup(await file.text());
+		if (file.size > TEACHERFLOW_BACKUP_MAX_BYTES) {
+			importError = 'File exceeds the 1 MB import limit.';
+			return;
+		}
+		let parsed;
+		try {
+			parsed = parseTeacherFlowBackup(await file.text());
+		} catch {
+			importError = 'File could not be read. Retry with a valid local backup.';
+			return;
+		}
 		if (!parsed.ok) {
 			importError =
 				parsed.reason === 'too_large'
@@ -142,6 +156,7 @@
 </div>
 
 <ConfirmDialog
+	id="data-reset-demo"
 	open={resetDemo}
 	title="Régénérer les données de démonstration ?"
 	description="Les modifications apportées aux données fictives seront remplacées par le scénario de démonstration."
@@ -153,11 +168,13 @@
 	oncancel={() => (resetDemo = false)}
 />
 <ConfirmDialog
+	id="data-reset-personal"
 	open={resetPersonal}
 	title="Supprimer toutes vos données locales ?"
 	description="Cours, séances, observations, décisions et sauvegardes de récupération seront supprimés de cet appareil. Cette action ne peut pas être annulée."
 	confirmLabel="Supprimer définitivement"
 	danger={true}
+	typedPhrase="SUPPRIMER"
 	onconfirm={async () => {
 		await teacherFlow.resetPersonal();
 		resetPersonal = false;

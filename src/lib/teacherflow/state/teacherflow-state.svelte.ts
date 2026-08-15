@@ -2,16 +2,14 @@ import { SvelteMap } from 'svelte/reactivity';
 import { TeacherFlowStorageError } from '../data/errors';
 import type { TeacherFlowRepository } from '../data/repository';
 import { createDemoSeed, DEMO_WORKSPACE_ID, PERSONAL_WORKSPACE_ID } from '../demo/seed';
+import { TEACHERFLOW_APP_VERSION } from '../version';
 import {
 	archiveCourse,
 	createCourse,
 	createDecision,
 	createObservation,
 	createSession,
-	updateDecisionStatus,
-	updateDecisionText,
 	updateCourse,
-	updateObservation,
 	updateSession
 } from '../domain/commands';
 import { DomainError } from '../domain/invariants';
@@ -54,6 +52,7 @@ export interface TeacherFlowState {
 	readonly snapshot: WorkspaceSnapshot;
 	readonly draft?: ObservationFlowDraft;
 	readonly status?: TeacherFlowStatus;
+	readonly lastExportedAt?: string;
 	readonly today: ReturnType<typeof selectToday>;
 	memory(filters: MemoryFilters): ReturnType<typeof selectMemory>;
 	hydrate(): Promise<void>;
@@ -62,14 +61,21 @@ export interface TeacherFlowState {
 	archiveCourse(course: Course): Promise<void>;
 	saveSession(draft: SessionDraft, current?: Session): Promise<void>;
 	saveObservationFlow(draft: ObservationFlowDraft): Promise<void>;
-	saveObservation(draft: ObservationDraft, current: Observation): Promise<void>;
+	editObservationWithDecision(
+		draft: ObservationDraft,
+		current: Observation,
+		decision?: Decision,
+		decisionText?: string
+	): Promise<boolean>;
 	saveDecision(draft: DecisionDraft): Promise<void>;
-	editDecisionText(decision: Decision, text: string): Promise<void>;
-	advanceDecision(decision: Decision): Promise<void>;
+	advanceDecision(decision: Decision): Promise<boolean>;
 	deleteObservation(observationId: string): Promise<void>;
+	deleteSession(sessionId: string): Promise<void>;
+	deleteCourse(courseId: string): Promise<void>;
 	resetDemo(): Promise<void>;
 	resetPersonal(): Promise<void>;
 	replacePersonal(snapshot: WorkspaceSnapshot): Promise<void>;
+	markPersonalExportedAt(exportedAt: string): Promise<boolean>;
 }
 
 type MutationContext = {
@@ -105,7 +111,8 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 	const values = new SvelteMap<string, unknown>([
 		['phase', 'loading' satisfies TeacherFlowPhase],
 		['workspaceId', DEMO_WORKSPACE_ID],
-		['snapshot', emptySnapshot(DEMO_WORKSPACE_ID)]
+		['snapshot', emptySnapshot(DEMO_WORKSPACE_ID)],
+		['lastExportedAt', undefined]
 	]);
 	let repository: TeacherFlowRepository | undefined;
 	let workspaceEpoch = 0;
@@ -219,20 +226,21 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 	function enqueueMutation(
 		retainedDraft: ObservationFlowDraft | undefined,
 		action: (context: MutationContext) => Promise<void>
-	): Promise<void> {
+	): Promise<boolean> {
 		const draftToRetain =
 			retainedDraft && isDraftFromActiveWorkspace(retainedDraft) ? retainedDraft : undefined;
 		if (draftToRetain) write('draft', draftToRetain);
 		const context = captureMutation();
 		if (!context) {
-			if (retainedDraft && !draftToRetain) return Promise.resolve();
+			if (retainedDraft && !draftToRetain) return Promise.resolve(false);
 			write('status', {
 				kind: 'error',
 				message: 'Le stockage local est encore en cours de préparation. Réessayez dans un instant.'
 			} satisfies TeacherFlowStatus);
-			return Promise.resolve();
+			return Promise.resolve(false);
 		}
 		write('status', undefined);
+		write('lastExportedAt', undefined);
 		const run = mutationQueue.then(async () => {
 			let committed = false;
 			try {
@@ -240,24 +248,29 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 				committed = true;
 				markWorkspaceCommitted(context.workspaceId);
 				await refreshActiveWorkspaceAfterCommit(context.workspaceId);
-				if (!isLatestMutation(context)) return;
+				if (!isLatestMutation(context)) return false;
 				write('draft', undefined);
 				write('status', {
 					kind: 'success',
 					message: 'Enregistré localement'
 				} satisfies TeacherFlowStatus);
 				write('phase', isOnline() ? 'ready' : 'degraded');
+				return true;
 			} catch (error) {
-				if (!isLatestMutation(context)) return;
+				if (!isLatestMutation(context)) return false;
 				if (committed) write('phase', 'error' satisfies TeacherFlowPhase);
 				if (draftToRetain) write('draft', draftToRetain);
 				write('status', {
 					kind: 'error',
 					message: recoveryMessage(error)
 				} satisfies TeacherFlowStatus);
+				return false;
 			}
 		});
-		mutationQueue = run.catch(() => undefined);
+		mutationQueue = run.then(
+			() => undefined,
+			() => undefined
+		);
 		return run;
 	}
 
@@ -288,6 +301,12 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 					write('phase', isOnline() ? 'ready' : 'degraded');
 				}
 			);
+			if (
+				activationIsCurrent(epoch, nextWorkspaceId) &&
+				nextWorkspaceId === PERSONAL_WORKSPACE_ID
+			) {
+				write('lastExportedAt', await nextRepository.lastPersonalExportedAt());
+			}
 		} catch (error) {
 			if (!activationIsCurrent(epoch, nextWorkspaceId)) return;
 			write('phase', 'error' satisfies TeacherFlowPhase);
@@ -313,6 +332,9 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 		},
 		get status() {
 			return read<TeacherFlowStatus | undefined>('status');
+		},
+		get lastExportedAt() {
+			return read<string | undefined>('lastExportedAt');
 		},
 		get today() {
 			return selectToday(read<WorkspaceSnapshot>('snapshot'), options.clock());
@@ -384,16 +406,34 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 				return context.repository.putObservationWithDecision(observation, decision);
 			});
 		},
-		async saveObservation(nextDraft, current) {
-			await enqueueMutation(undefined, (context) =>
-				context.repository.putObservation(
-					updateObservation(
-						current,
-						{ ...nextDraft, workspaceId: context.workspaceId },
-						options.clock
-					)
-				)
-			);
+		async editObservationWithDecision(nextDraft, current, decision, decisionText) {
+			return enqueueMutation(undefined, async (context) => {
+				if (
+					current.workspaceId !== context.workspaceId ||
+					decision?.workspaceId !== context.workspaceId
+				) {
+					throw new DomainError(
+						'workspace_mismatch',
+						'Entity belongs to another workspace',
+						'workspaceId'
+					);
+				}
+				await context.repository.editObservationWithDecision({
+					observationId: current.id,
+					expectedObservationUpdatedAt: current.updatedAt,
+					observation: { ...nextDraft, workspaceId: context.workspaceId },
+					...(decision
+						? {
+								decision: {
+									id: decision.id,
+									expectedUpdatedAt: decision.updatedAt,
+									text: decisionText ?? decision.text
+								}
+							}
+						: {}),
+					now: options.clock
+				});
+			});
 		},
 		async saveDecision(nextDraft) {
 			await enqueueMutation(undefined, (context) =>
@@ -402,20 +442,8 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 				)
 			);
 		},
-		async editDecisionText(decision, text) {
-			await enqueueMutation(undefined, (context) => {
-				if (decision.workspaceId !== context.workspaceId) {
-					throw new DomainError(
-						'workspace_mismatch',
-						'Decision belongs to another workspace',
-						'workspaceId'
-					);
-				}
-				return context.repository.putDecision(updateDecisionText(decision, text, options.clock));
-			});
-		},
 		async advanceDecision(decision) {
-			await enqueueMutation(undefined, (context) => {
+			return enqueueMutation(undefined, async (context) => {
 				if (decision.workspaceId !== context.workspaceId) {
 					throw new DomainError(
 						'workspace_mismatch',
@@ -424,13 +452,24 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 					);
 				}
 				const next = decision.status === 'to_prepare' ? 'ready' : 'applied';
-				return context.repository.putDecision(updateDecisionStatus(decision, next, options.clock));
+				await context.repository.advanceDecision({
+					decisionId: decision.id,
+					expectedUpdatedAt: decision.updatedAt,
+					nextStatus: next,
+					now: options.clock
+				});
 			});
 		},
 		async deleteObservation(observationId) {
 			await enqueueMutation(undefined, (context) =>
 				context.repository.deleteObservation(observationId)
 			);
+		},
+		async deleteSession(sessionId) {
+			await enqueueMutation(undefined, (context) => context.repository.deleteSession(sessionId));
+		},
+		async deleteCourse(courseId) {
+			await enqueueMutation(undefined, (context) => context.repository.deleteCourse(courseId));
 		},
 		async resetDemo() {
 			if (read<TeacherFlowWorkspaceId>('workspaceId') !== DEMO_WORKSPACE_ID) return;
@@ -445,8 +484,16 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 		async replacePersonal(nextSnapshot) {
 			if (read<TeacherFlowWorkspaceId>('workspaceId') !== PERSONAL_WORKSPACE_ID) return;
 			await enqueueMutation(undefined, (context) =>
-				context.repository.replaceWorkspace(nextSnapshot)
+				context.repository.importPersonalWorkspace(nextSnapshot, TEACHERFLOW_APP_VERSION)
 			);
+		},
+		async markPersonalExportedAt(exportedAt) {
+			if (read<TeacherFlowWorkspaceId>('workspaceId') !== PERSONAL_WORKSPACE_ID) return false;
+			const saved = await enqueueMutation(undefined, (context) =>
+				context.repository.markPersonalExportedAt(exportedAt)
+			);
+			if (saved) write('lastExportedAt', exportedAt);
+			return saved;
 		}
 	};
 }

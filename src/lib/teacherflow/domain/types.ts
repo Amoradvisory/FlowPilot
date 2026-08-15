@@ -98,7 +98,7 @@ export interface DeletionSet {
 }
 
 export interface DeletionIntent {
-	readonly kind: 'delete_observation' | 'delete_course';
+	readonly kind: 'delete_observation' | 'delete_session' | 'delete_course';
 	readonly workspaceId: WorkspaceId;
 	readonly delete: DeletionSet;
 	readonly clearDecisionTargetIds: readonly EntityId[];

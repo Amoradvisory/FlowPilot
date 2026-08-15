@@ -37,6 +37,26 @@
 		busy = false;
 		localStatus = teacherFlow.status ?? undefined;
 	}
+
+	async function remove() {
+		if (!current) return;
+		const observations = teacherFlow.snapshot.observations.filter(
+			(observation) => observation.sessionId === current.id
+		);
+		const observationIds = new Set(observations.map(({ id }) => id));
+		const decisions = teacherFlow.snapshot.decisions.filter((decision) =>
+			observationIds.has(decision.observationId)
+		);
+		if (
+			!window.confirm(
+				`Supprimer cette séance et ${observations.length} observation(s), ${decisions.length} décision(s) ?`
+			)
+		)
+			return;
+		busy = true;
+		await teacherFlow.deleteSession(current.id);
+		busy = false;
+	}
 </script>
 
 <form class="entity-form" onsubmit={submit} aria-labelledby="session-form-title">
@@ -73,5 +93,8 @@
 	<button class="button button--primary" type="submit" disabled={busy}>
 		{current ? 'Enregistrer la séance' : 'Créer la séance'}
 	</button>
+	{#if current}<button class="button button--quiet" type="button" disabled={busy} onclick={remove}
+			>Supprimer cette séance</button
+		>{/if}
 	<StatusMessage kind={localStatus?.kind ?? 'info'} message={localStatus?.message} />
 </form>

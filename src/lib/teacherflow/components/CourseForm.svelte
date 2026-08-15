@@ -37,6 +37,30 @@
 		busy = false;
 		localStatus = teacherFlow.status ?? undefined;
 	}
+
+	async function remove() {
+		if (!current) return;
+		const sessions = teacherFlow.snapshot.sessions.filter(
+			(session) => session.courseId === current.id
+		);
+		const sessionIds = new Set(sessions.map(({ id }) => id));
+		const observations = teacherFlow.snapshot.observations.filter((observation) =>
+			sessionIds.has(observation.sessionId)
+		);
+		const observationIds = new Set(observations.map(({ id }) => id));
+		const decisions = teacherFlow.snapshot.decisions.filter((decision) =>
+			observationIds.has(decision.observationId)
+		);
+		if (
+			!window.confirm(
+				`Supprimer ${current.name} et ${sessions.length} séance(s), ${observations.length} observation(s), ${decisions.length} décision(s) ?`
+			)
+		)
+			return;
+		busy = true;
+		await teacherFlow.deleteCourse(current.id);
+		busy = false;
+	}
 </script>
 
 <form class="entity-form" onsubmit={submit} aria-labelledby="course-form-title">
@@ -70,6 +94,9 @@
 			<button class="button button--quiet" type="button" disabled={busy} onclick={archive}>
 				Archiver ce cours
 			</button>
+			<button class="button button--quiet" type="button" disabled={busy} onclick={remove}
+				>Supprimer ce cours</button
+			>
 		{/if}
 	</div>
 	<StatusMessage kind={localStatus?.kind ?? 'info'} message={localStatus?.message} />

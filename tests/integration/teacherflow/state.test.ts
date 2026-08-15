@@ -42,6 +42,12 @@ function repository(workspaceId: string, snapshot = empty(workspaceId)): Teacher
 				]
 			};
 		},
+		editObservationWithDecision: async () => {
+			throw new Error('not exercised by this test double');
+		},
+		advanceDecision: async () => {
+			throw new Error('not exercised by this test double');
+		},
 		putObservationWithDecision: async (observation, decision) => {
 			current = {
 				...current,
@@ -53,6 +59,7 @@ function repository(workspaceId: string, snapshot = empty(workspaceId)): Teacher
 			current = { ...current, decisions: [...current.decisions, decision] };
 		},
 		deleteObservation: async () => {},
+		deleteSession: async () => {},
 		deleteCourse: async (courseId) => {
 			current = {
 				...current,
@@ -63,6 +70,11 @@ function repository(workspaceId: string, snapshot = empty(workspaceId)): Teacher
 		replaceWorkspace: async (next) => {
 			current = next;
 		},
+		importPersonalWorkspace: async (next) => {
+			current = next;
+		},
+		lastPersonalExportedAt: async () => undefined,
+		markPersonalExportedAt: async () => {},
 		clearWorkspace: async () => {
 			current = empty(workspaceId);
 		},

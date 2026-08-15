@@ -342,3 +342,38 @@ export function planCourseDeletion(snapshot: WorkspaceSnapshot, courseId: string
 		requiresDetailedConfirmation: true
 	};
 }
+
+export function planSessionDeletion(
+	snapshot: WorkspaceSnapshot,
+	sessionId: string
+): DeletionIntent {
+	validateWorkspaceSnapshot(snapshot);
+	const id = entityId(sessionId, 'sessionId');
+	if (!snapshot.sessions.some((session) => session.id === id)) {
+		throw new DomainError('relation_not_found', 'Session not found', 'sessionId');
+	}
+	const observationIds = new Set(
+		snapshot.observations.filter((observation) => observation.sessionId === id).map(({ id }) => id)
+	);
+	const decisionIds = new Set(
+		snapshot.decisions
+			.filter((decision) => observationIds.has(decision.observationId))
+			.map(({ id }) => id)
+	);
+	return {
+		kind: 'delete_session',
+		workspaceId: snapshot.workspaceId,
+		delete: {
+			courseIds: [],
+			sessionIds: [id],
+			observationIds: sorted(observationIds),
+			decisionIds: sorted(decisionIds)
+		},
+		clearDecisionTargetIds: sorted(
+			snapshot.decisions
+				.filter((decision) => !decisionIds.has(decision.id) && decision.targetSessionId === id)
+				.map(({ id }) => id)
+		),
+		requiresDetailedConfirmation: true
+	};
+}

@@ -20,6 +20,12 @@
 			: []
 	);
 	const firstSession = $derived(courseSessions[0]);
+	const allSessions = $derived(
+		teacherFlow.snapshot.sessions.filter(
+			(session) =>
+				!teacherFlow.snapshot.courses.find((course) => course.id === session.courseId)?.archivedAt
+		)
+	);
 	const courseById = $derived(
 		new Map(teacherFlow.snapshot.courses.map((course) => [course.id, course]))
 	);
@@ -147,6 +153,30 @@
 						<SessionForm courses={activeCourses} current={firstSession} />
 					{/key}
 				</div>
+			</section>
+		{/if}
+
+		{#if teacherFlow.workspaceId === PERSONAL_WORKSPACE_ID}
+			<section
+				class="management-section"
+				aria-labelledby="all-context-title"
+				data-testid="all-personal-context"
+			>
+				<h2 id="all-context-title">Tous les cours et séances</h2>
+				<p>
+					Chaque contexte reste modifiable séparément ; aucun cours n’est relégué derrière le
+					premier de la file.
+				</p>
+				<CourseForm />
+				{#each activeCourses as course (course.id)}
+					<section class="management-section" aria-label={`Cours ${course.name}`}>
+						<CourseForm current={course} />
+						{#each allSessions.filter((session) => session.courseId === course.id) as session (session.id)}
+							<SessionForm courses={activeCourses} current={session} />
+						{/each}
+						<SessionForm courses={[course]} />
+					</section>
+				{/each}
 			</section>
 		{/if}
 	{/if}
