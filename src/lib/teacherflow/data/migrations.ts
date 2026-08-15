@@ -156,8 +156,13 @@ async function ensureBackup(
 	createdAt: string
 ): Promise<boolean> {
 	return database.transaction('rw', database.recoveryBackups, async () => {
-		const key: [string, string] = [workspaceId, source.migrationId];
-		if (await database.recoveryBackups.get(key)) return false;
+		if (
+			await database.recoveryBackups
+				.where('[workspaceId+migrationId]')
+				.equals([workspaceId, source.migrationId])
+				.first()
+		)
+			return false;
 		await database.recoveryBackups.add({
 			workspaceId,
 			migrationId: source.migrationId,

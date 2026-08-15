@@ -165,9 +165,9 @@ describe('TeacherFlowRepository', () => {
 		};
 		const repo = await openTeacherFlowRepository('personal', {
 			databaseName: name,
-			storage,
-			migrateLegacy: false
+			storage
 		});
+		expect(repo.migration).toMatchObject({ recovered: 1, backupCreated: true });
 		const sourceSession = { ...session(), scheduledFor: '2026-08-16T09:00:00.000Z' };
 		const secondCourse = { ...course(), id: 'course-two', name: 'Sciences' };
 		const target = {
@@ -221,5 +221,22 @@ describe('TeacherFlowRepository', () => {
 			observations: [],
 			decisions: []
 		});
+	});
+
+	it('rolls back linked observation and decision writes after the first write fails', async () => {
+		const repo = await openTeacherFlowRepository('personal', {
+			databaseName: databaseName(),
+			migrateLegacy: false,
+			afterLinkedWrite: () => {
+				throw new Error('forced linked-write failure');
+			}
+		});
+		await repo.putCourse(course());
+		await repo.putSession(session());
+		const before = await repo.load();
+		await expect(repo.putObservationWithDecision(observation(), decision())).rejects.toThrow(
+			'forced linked-write failure'
+		);
+		expect(await repo.load()).toEqual(before);
 	});
 });

@@ -7,6 +7,7 @@ import {
 	PUBLIC_DEMO_MIGRATION_ID,
 	PUBLIC_DEMO_STORAGE_KEY
 } from '../../../src/lib/teacherflow/data/migrations';
+import Dexie from 'dexie';
 
 const names: string[] = [];
 function databaseName(): string {
@@ -27,6 +28,43 @@ afterEach(async () => {
 });
 
 describe('legacy localStorage migration', () => {
+	it('upgrades the exact v1 recoveryBackups schema without changing its primary key', async () => {
+		const name = databaseName();
+		const v1 = new Dexie(name);
+		v1.version(1).stores({
+			courses: '[workspaceId+id], workspaceId, id, [workspaceId+updatedAt]',
+			sessions:
+				'[workspaceId+id], workspaceId, id, [workspaceId+courseId], [workspaceId+scheduledFor], [workspaceId+updatedAt]',
+			observations:
+				'[workspaceId+id], workspaceId, id, [workspaceId+sessionId], [workspaceId+createdAt], [workspaceId+updatedAt]',
+			decisions:
+				'[workspaceId+id], workspaceId, id, [workspaceId+observationId], [workspaceId+targetSessionId], [workspaceId+status], [workspaceId+updatedAt]',
+			meta: '[workspaceId+key], workspaceId, key',
+			recoveryBackups: '++id, workspaceId, migrationId, [workspaceId+migrationId], createdAt'
+		});
+		await v1.open();
+		await v1.table('recoveryBackups').add({
+			workspaceId: 'personal',
+			migrationId: PUBLIC_DEMO_MIGRATION_ID,
+			raw: 'v1 backup',
+			truncated: false,
+			createdAt: '2026-08-15T09:00:00.000Z'
+		});
+		await v1.close();
+		const database = new TeacherFlowDatabase(name);
+		await database.open();
+		expect(
+			await database.recoveryBackups
+				.where('[workspaceId+migrationId]')
+				.equals(['personal', PUBLIC_DEMO_MIGRATION_ID])
+				.first()
+		).toMatchObject({ raw: 'v1 backup' });
+		expect(database.recoveryBackups.schema.primKey.auto).toBe(true);
+		expect(database.recoveryBackups.schema.idxByName['[workspaceId+migrationId]']?.unique).toBe(
+			true
+		);
+		await database.close();
+	});
 	it('migrates the exact public-demo payload with explicit neutral-signal mapping and canonical capturedAt', async () => {
 		const storage = storageFor(
 			JSON.stringify([
@@ -141,7 +179,10 @@ describe('legacy localStorage migration', () => {
 		).rejects.toMatchObject({ name: 'MigrationFailed' });
 		const database = new TeacherFlowDatabase(name);
 		await database.open();
-		const backup = await database.recoveryBackups.get(['personal', PUBLIC_DEMO_MIGRATION_ID]);
+		const backup = await database.recoveryBackups
+			.where('[workspaceId+migrationId]')
+			.equals(['personal', PUBLIC_DEMO_MIGRATION_ID])
+			.first();
 		expect(new TextEncoder().encode(backup?.raw).byteLength).toBeLessThanOrEqual(
 			MAX_RECOVERY_BACKUP_BYTES
 		);
@@ -163,7 +204,10 @@ describe('legacy localStorage migration', () => {
 		const database = new TeacherFlowDatabase(name);
 		await database.open();
 		expect(
-			await database.recoveryBackups.get(['personal', PUBLIC_DEMO_MIGRATION_ID])
+			await database.recoveryBackups
+				.where('[workspaceId+migrationId]')
+				.equals(['personal', PUBLIC_DEMO_MIGRATION_ID])
+				.first()
 		).toMatchObject({ raw: '{not json' });
 		expect(await database.meta.get(['personal', PUBLIC_DEMO_MIGRATION_ID])).toBeUndefined();
 		await database.close();
@@ -183,6 +227,31 @@ describe('legacy localStorage migration', () => {
 		).rejects.toMatchObject({ name: 'StorageUnavailable' });
 		await expect(
 			openTeacherFlowRepository('personal', { databaseName: databaseName(), indexedDB: null })
+		).rejects.toMatchObject({ name: 'StorageUnavailable' });
+	});
+
+	it('works with an injected complete IndexedDB port and refuses an incomplete one', async () => {
+		const name = databaseName();
+		const repository = await openTeacherFlowRepository('personal', {
+			databaseName: name,
+			migrateLegacy: false,
+			indexedDB,
+			idbKeyRange: IDBKeyRange
+		});
+		expect(await repository.load()).toEqual({
+			workspaceId: 'personal',
+			courses: [],
+			sessions: [],
+			observations: [],
+			decisions: []
+		});
+		await expect(
+			openTeacherFlowRepository('personal', {
+				databaseName: databaseName(),
+				migrateLegacy: false,
+				indexedDB,
+				idbKeyRange: null
+			})
 		).rejects.toMatchObject({ name: 'StorageUnavailable' });
 	});
 

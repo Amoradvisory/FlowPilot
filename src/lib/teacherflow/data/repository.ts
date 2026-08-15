@@ -37,11 +37,13 @@ export interface OpenTeacherFlowRepositoryOptions {
 	databaseName?: string;
 	/** Optional platform port for SSR/tests; Dexie itself never crosses this API. */
 	indexedDB?: IDBFactory | null;
+	idbKeyRange?: typeof IDBKeyRange | null;
 	/** Inject localStorage; SSR can omit it safely. */
 	storage?: StorageAdapter;
 	migrateLegacy?: boolean;
 	now?: () => Date;
 	migrationAfterFirstWrite?: LegacyMigrationOptions['afterFirstWrite'];
+	afterLinkedWrite?: () => void | Promise<void>;
 }
 
 function ordered<T extends { id: string }>(values: T[]): T[] {
@@ -52,7 +54,8 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 	constructor(
 		readonly workspaceId: WorkspaceId,
 		private readonly database: TeacherFlowDatabase,
-		readonly migration: MigrationResult
+		readonly migration: MigrationResult,
+		private readonly afterLinkedWrite?: () => void | Promise<void>
 	) {}
 
 	async load(): Promise<WorkspaceSnapshot> {
@@ -97,6 +100,7 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 			};
 			validateWorkspaceSnapshot(next);
 			await this.database.observations.put(observation);
+			await this.afterLinkedWrite?.();
 			if (decision) await this.database.decisions.put(decision);
 		});
 	}
@@ -240,9 +244,11 @@ export async function openTeacherFlowRepository(
 	try {
 		const indexedDB =
 			options.indexedDB === null ? undefined : (options.indexedDB ?? globalThis.indexedDB);
-		if (!indexedDB)
+		const idbKeyRange =
+			options.idbKeyRange === null ? undefined : (options.idbKeyRange ?? globalThis.IDBKeyRange);
+		if (!indexedDB || !idbKeyRange)
 			throw Object.assign(new Error('IndexedDB unavailable'), { name: 'MissingAPIError' });
-		const database = new TeacherFlowDatabase(options.databaseName, indexedDB);
+		const database = new TeacherFlowDatabase(options.databaseName, indexedDB, idbKeyRange);
 		await database.open();
 		const canMigrate =
 			(options.migrateLegacy !== false &&
@@ -260,7 +266,12 @@ export async function openTeacherFlowRepository(
 					afterFirstWrite: options.migrationAfterFirstWrite
 				})
 			: { recovered: 0, ignored: 0, backupCreated: false, alreadyApplied: false };
-		return new DexieTeacherFlowRepository(workspaceId, database, migration);
+		return new DexieTeacherFlowRepository(
+			workspaceId,
+			database,
+			migration,
+			options.afterLinkedWrite
+		);
 	} catch (error) {
 		throw mapStorageError(error);
 	}
