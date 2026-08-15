@@ -17,6 +17,7 @@ Thumbs.db
 .dev-*.log
 /tmp
 /output
+/.worktrees/
 
 # Env
 .env
