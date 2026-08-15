@@ -333,4 +333,41 @@ describe('TeacherFlow state controller', () => {
 		expect(failing.phase).toBe('error');
 		expect(failing.status).toMatchObject({ kind: 'error' });
 	});
+
+	it('retains an exact draft saved while workspace activation is pending', async () => {
+		const opening = deferred<TeacherFlowRepository>();
+		const state = createTeacherFlowState({ repositoryFactory: async () => opening.promise, clock });
+		const draft = observationDraft('Saisie pendant le chargement.');
+
+		const hydration = state.hydrate();
+		await state.saveObservationFlow(draft);
+		expect(state.draft).toEqual(draft);
+		expect(state.status).toMatchObject({
+			kind: 'error',
+			message: expect.stringMatching(/Réessayez/u)
+		});
+		opening.resolve(repository(DEMO_WORKSPACE_ID));
+		await hydration;
+		expect(state.draft).toEqual(draft);
+	});
+
+	it('retains an exact draft after workspace activation has failed', async () => {
+		const state = createTeacherFlowState({
+			repositoryFactory: async () => {
+				throw new StorageFull();
+			},
+			clock
+		});
+		const draft = observationDraft('Saisie après échec du stockage.');
+
+		await state.hydrate();
+		await state.saveObservationFlow(draft);
+
+		expect(state.phase).toBe('error');
+		expect(state.draft).toEqual(draft);
+		expect(state.status).toMatchObject({
+			kind: 'error',
+			message: expect.stringMatching(/Réessayez/u)
+		});
+	});
 });

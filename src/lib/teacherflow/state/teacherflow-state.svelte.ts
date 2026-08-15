@@ -116,6 +116,7 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 		retainedDraft: ObservationFlowDraft | undefined,
 		action: (context: MutationContext) => Promise<void>
 	): Promise<void> {
+		if (retainedDraft) write('draft', retainedDraft);
 		const context = captureMutation();
 		if (!context) {
 			write('status', {
@@ -125,7 +126,6 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 			return Promise.resolve();
 		}
 		write('status', undefined);
-		if (retainedDraft) write('draft', retainedDraft);
 		const run = mutationQueue.then(async () => {
 			let committed = false;
 			try {
