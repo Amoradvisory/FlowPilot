@@ -119,13 +119,16 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 		};
 	}
 
-	function mutationIsCurrent(context: MutationContext): boolean {
+	function belongsToActiveWorkspace(context: MutationContext): boolean {
 		return (
 			workspaceEpoch === context.workspaceEpoch &&
 			read<TeacherFlowWorkspaceId>('workspaceId') === context.workspaceId &&
-			repository === context.repository &&
-			mutationEpoch === context.mutationEpoch
+			repository === context.repository
 		);
+	}
+
+	function isLatestMutation(context: MutationContext): boolean {
+		return belongsToActiveWorkspace(context) && mutationEpoch === context.mutationEpoch;
 	}
 
 	function isDraftFromActiveWorkspace(draft: ObservationFlowDraft): boolean {
@@ -158,10 +161,11 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 			try {
 				await action(context);
 				committed = true;
-				if (!mutationIsCurrent(context)) return;
+				if (!belongsToActiveWorkspace(context)) return;
 				const nextSnapshot = await context.repository.load();
-				if (!mutationIsCurrent(context)) return;
+				if (!belongsToActiveWorkspace(context)) return;
 				write('snapshot', nextSnapshot);
+				if (!isLatestMutation(context)) return;
 				write('draft', undefined);
 				write('status', {
 					kind: 'success',
@@ -169,7 +173,7 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 				} satisfies TeacherFlowStatus);
 				write('phase', isOnline() ? 'ready' : 'degraded');
 			} catch (error) {
-				if (!mutationIsCurrent(context)) return;
+				if (!isLatestMutation(context)) return;
 				if (committed) write('phase', 'error' satisfies TeacherFlowPhase);
 				if (draftToRetain) write('draft', draftToRetain);
 				write('status', {

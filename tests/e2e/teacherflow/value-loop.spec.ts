@@ -59,4 +59,50 @@ test.describe('TeacherFlow core value loop', () => {
 		await expect(page).toHaveURL(/\/FlowPilot\/teacher\/$/u);
 		await expect(page.getByText(exactDecision, { exact: true })).toBeVisible();
 	});
+
+	test('keeps radio focus visible and the saved mobile decision fully in view', async ({
+		page
+	}) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('./observe/');
+		const form = page.getByTestId('observe-form');
+		await expect(form).toBeVisible();
+
+		const keep = form.getByLabel('Signal : À conserver');
+		const adjust = form.getByLabel('Signal : À ajuster');
+		const verify = form.getByLabel('Signal : À vérifier');
+		await keep.focus();
+		for (const radio of [keep, adjust, verify]) {
+			await expect(radio).toBeFocused();
+			const outline = await radio.locator('..').evaluate((label) => {
+				const style = getComputedStyle(label);
+				return { style: style.outlineStyle, width: style.outlineWidth };
+			});
+			expect(outline).toEqual({ style: 'solid', width: '3px' });
+			if (radio !== verify) await page.keyboard.press('ArrowRight');
+		}
+
+		await form
+			.getByLabel('Observation')
+			.fill('Un exemple commun rend la consigne plus facile à comparer.');
+		const exactDecision = 'Afficher un exemple commun avant la prochaine consigne mobile.';
+		await form.getByLabel('Décision pédagogique').fill(exactDecision);
+		await form
+			.getByLabel('Séance cible (facultatif)')
+			.selectOption({ label: 'Préparer une stratégie de comparaison' });
+		await form.getByRole('button', { name: 'Enregistrer la décision' }).click();
+
+		const saved = page.getByTestId('saved-decision');
+		await expect(saved).toBeFocused();
+		await expect(saved).toContainText(exactDecision);
+		const savedBox = await saved.boundingBox();
+		expect(savedBox).not.toBeNull();
+		expect(savedBox!.y).toBeGreaterThanOrEqual(0);
+		expect(savedBox!.y + savedBox!.height).toBeLessThanOrEqual(844);
+		await page.screenshot({
+			path: '.superpowers/sdd/2026-08-15-teacherflow-signature-edition/task-6-mobile-saved.png'
+		});
+		await saved.getByRole('link', { name: 'Revenir à Aujourd’hui' }).click();
+		await expect(page.getByText(exactDecision, { exact: true })).toBeVisible();
+	});
 });

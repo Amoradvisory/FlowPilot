@@ -492,6 +492,11 @@ body {
 	background: #e2ede6;
 }
 
+.signal-options label:focus-within {
+	outline: 3px solid #d47742;
+	outline-offset: 3px;
+}
+
 .signal-options input {
 	position: absolute;
 	width: 1px;

@@ -327,6 +327,31 @@ describe('TeacherFlow state controller', () => {
 		expect(state.status).toMatchObject({ kind: 'success', message: 'Enregistré localement' });
 	});
 
+	it('publishes an earlier committed snapshot when the latest queued mutation fails', async () => {
+		const personal = repository(PERSONAL_WORKSPACE_ID);
+		const committedWrite = personal.putObservationWithDecision;
+		personal.putObservationWithDecision = async (observation, decision) => {
+			if (observation.note === 'M2 échoue avant commit.') throw new StorageFull();
+			await committedWrite(observation, decision);
+		};
+		const state = createTeacherFlowState({ repositoryFactory: async () => personal, clock });
+		await state.switchWorkspace(PERSONAL_WORKSPACE_ID);
+		const firstDraft = observationDraft('M1 est commitée.');
+		const latestDraft = observationDraft('M2 échoue avant commit.');
+
+		await Promise.all([
+			state.saveObservationFlow(firstDraft),
+			state.saveObservationFlow(latestDraft)
+		]);
+
+		expect(state.snapshot.observations.map(({ note }) => note)).toEqual(['M1 est commitée.']);
+		expect(state.status).toMatchObject({
+			kind: 'error',
+			message: new StorageFull().recoveryInstruction
+		});
+		expect(state.draft).toEqual(latestDraft);
+	});
+
 	it('keeps a coherent phase for loading, degraded, and reload failures', async () => {
 		const reload = deferred<WorkspaceSnapshot>();
 		let loads = 0;
