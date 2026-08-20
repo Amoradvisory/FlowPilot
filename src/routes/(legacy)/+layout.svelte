@@ -97,6 +97,9 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
+	<meta name="mobile-web-app-capable" content="yes" />
+	<meta name="apple-mobile-web-app-capable" content="yes" />
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 	{#if !isTeacherFlow}
 		<link rel="manifest" href="/manifest.json" />
 	{/if}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { onMount } from 'svelte';
 	import AppShell from '$lib/teacherflow/components/AppShell.svelte';
 	import { setTeacherFlowState } from '$lib/teacherflow/state/context';
@@ -20,5 +21,10 @@
 		void teacherFlow.hydrate();
 	});
 </script>
+
+<svelte:head>
+	<link rel="icon" href={`${base}/favicon.ico`} />
+	<meta name="theme-color" content="#1f4d3c" />
+</svelte:head>
 
 <AppShell>{@render children()}</AppShell>

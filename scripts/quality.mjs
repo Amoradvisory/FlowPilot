@@ -8,6 +8,24 @@ const commands = {
 	],
 	unit: [[node, ['node_modules/vitest/vitest.mjs', 'run', '--project', 'unit']]],
 	integration: [[node, ['node_modules/vitest/vitest.mjs', 'run', '--project', 'integration']]],
+	lint: [
+		[
+			node,
+			[
+				'node_modules/prettier/bin/prettier.cjs',
+				'--check',
+				'scripts/quality.mjs',
+				'vitest.config.ts',
+				'playwright.config.ts',
+				'src/lib/teacherflow',
+				'src/routes/(teacher)',
+				'src/routes/teacherflow.css',
+				'tests/unit/teacherflow',
+				'tests/integration/teacherflow',
+				'tests/e2e/teacherflow'
+			]
+		]
+	],
 	'build-pages': [[node, ['node_modules/vite/bin/vite.js', 'build'], { BASE_PATH: '/FlowPilot' }]]
 };
 

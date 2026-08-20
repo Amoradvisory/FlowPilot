@@ -14,7 +14,7 @@
 		"check": "node scripts/quality.mjs check",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"lint": "prettier --check .",
-		"lint:teacherflow": "prettier --check scripts/quality.mjs vitest.config.ts playwright.config.ts tests/unit/teacherflow",
+		"lint:teacherflow": "node scripts/quality.mjs lint",
 		"build:pages": "node scripts/quality.mjs build-pages",
 		"format": "prettier --write ."
 	},

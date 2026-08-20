@@ -3,8 +3,8 @@
 > Transformer un retour de cours de trente secondes en prochaine amélioration explicite, sans collecter de données élèves et sans confier le jugement pédagogique à une machine.
 
 - **Démonstration :** [amoradvisory.github.io/FlowPilot/teacher/](https://amoradvisory.github.io/FlowPilot/teacher/)
-- **Implémentation :** branche `teacherflow-demo`, [pull request #1](https://github.com/Amoradvisory/FlowPilot/pull/1)
-- **Statut :** prototype public fonctionnel — pas un déploiement institutionnel
+- **Implémentation :** route `/teacher/` de la branche principale, dans [`src/routes/(teacher)/teacher`](<src/routes/(teacher)/teacher>)
+- **Statut :** démonstrateur public fonctionnel — pas un test terrain ni un déploiement institutionnel
 
 ## 1. Quel problème est traité ?
 
@@ -46,25 +46,25 @@ La route `/teacher` utilise une coque autonome. Le visiteur voit TeacherFlow, ta
 
 Le visiteur peut :
 
-1. choisir un signal — **A fonctionné**, **A bloqué** ou **À tester** ;
-2. saisir une observation fictive ;
-3. obtenir une prochaine action dérivée du signal ;
-4. voir cette action rejoindre la file « à améliorer » ;
-5. retrouver ses captures après rechargement dans le même navigateur ;
-6. réinitialiser entièrement la démonstration.
+1. explorer un scénario entièrement fictif ou commencer dans un espace personnel vide ;
+2. créer localement des cours et des séances ;
+3. relier une observation non nominative à une décision pédagogique choisie par l’enseignant ;
+4. retrouver, filtrer, modifier ou supprimer cette mémoire ;
+5. préparer la prochaine séance à partir des décisions conservées ;
+6. exporter, prévisualiser, restaurer ou réinitialiser ses données locales.
 
-La logique métier est isolée dans un module TypeScript pur et couverte par des tests comportementaux : validation des entrées, normalisation, dérivation des actions, historique borné et restauration défensive d’un stockage malformé.
+La logique métier est isolée dans des modules TypeScript purs et couverte par des tests unitaires, d’intégration et de navigateur. Les migrations et restaurations refusent les données incohérentes au lieu de les accepter silencieusement.
 
 ## 6. Quelles données circulent ?
 
-| Élément                                      | Nature                               | Destination                  |
-| -------------------------------------------- | ------------------------------------ | ---------------------------- |
-| séances, groupes, priorités                  | données fictives intégrées à la démo | navigateur                   |
-| observation saisie par le visiteur           | texte de démonstration               | `localStorage` du navigateur |
-| action dérivée                               | calcul local déterministe            | interface et `localStorage`  |
-| donnée élève, compte ou identifiant scolaire | non collecté                         | nulle part                   |
+| Élément                                      | Nature                               | Destination             |
+| -------------------------------------------- | ------------------------------------ | ----------------------- |
+| séances, groupes, priorités                  | données fictives intégrées à la démo | navigateur              |
+| observation saisie par le visiteur           | texte non nominatif                  | IndexedDB du navigateur |
+| décision pédagogique                         | choix explicite de l’enseignant      | interface et IndexedDB  |
+| donnée élève, compte ou identifiant scolaire | non collecté                         | nulle part              |
 
-Aucune API distante n’est appelée par le parcours de capture. Le stockage peut être effacé depuis le bouton **Réinitialiser** ou les outils du navigateur.
+Aucune API distante n’est appelée par le parcours TeacherFlow. Le stockage peut être exporté, restauré ou effacé depuis l’interface.
 
 ## 7. Où l’IA pourrait-elle intervenir ?
 
@@ -95,6 +95,7 @@ Ces exemples servent à rendre le parcours immédiatement compréhensible. Ils n
 - pas de test utilisateur formalisé ;
 - pas de métrique de temps gagné, d’adoption ou d’effet sur l’apprentissage ;
 - pas d’assistance IA active.
+- aucune promesse PWA ou de fonctionnement hors ligne.
 
 Ces limites sont visibles par conception. Une preuve honnête vaut davantage qu’un faux produit complet dont les boutons pratiquent la méditation transcendantale.
 

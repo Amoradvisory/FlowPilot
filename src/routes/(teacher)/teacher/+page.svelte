@@ -34,10 +34,19 @@
 
 <svelte:head>
 	<title>Aujourd’hui · TeacherFlow</title>
+	<link rel="canonical" href="https://amoradvisory.github.io/FlowPilot/teacher/" />
 	<meta
 		name="description"
 		content="Retrouvez la prochaine séance et les décisions pédagogiques que vous avez choisi de préparer."
 	/>
+	<meta property="og:type" content="website" />
+	<meta property="og:title" content="TeacherFlow — mémoire pédagogique locale" />
+	<meta
+		property="og:description"
+		content="Une observation, une décision humaine et le bon prochain moment — sans compte ni donnée élève."
+	/>
+	<meta property="og:url" content="https://amoradvisory.github.io/FlowPilot/teacher/" />
+	<meta name="twitter:card" content="summary" />
 </svelte:head>
 
 <div class="page-shell today-page">
