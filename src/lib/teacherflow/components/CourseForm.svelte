@@ -1,5 +1,7 @@
 <script lang="ts">
+	import ConfirmDialog from './ConfirmDialog.svelte';
 	import type { Course } from '$lib/teacherflow/domain/types';
+	import { planCourseDeletion } from '$lib/teacherflow/domain/commands';
 	import { getTeacherFlowState } from '$lib/teacherflow/state/context';
 	import StatusMessage from './StatusMessage.svelte';
 
@@ -10,6 +12,14 @@
 	let colorToken = $state('moss');
 	let busy = $state(false);
 	let localStatus = $state<{ kind: 'success' | 'error'; message: string }>();
+	let archiveOpen = $state(false);
+	let deleteOpen = $state(false);
+	let archiveTrigger = $state<HTMLButtonElement>();
+	let deleteTrigger = $state<HTMLButtonElement>();
+	let deletionCounts = $state({ sessions: 0, observations: 0, decisions: 0, cleared: 0 });
+	const titleId = $derived(current ? `course-form-title-${current.id}` : 'course-form-title-new');
+	const count = (value: number, singular: string, plural: string) =>
+		`${value} ${value === 1 ? singular : plural}`;
 
 	$effect(() => {
 		name = current?.name ?? '';
@@ -19,55 +29,67 @@
 
 	async function submit(event: SubmitEvent) {
 		event.preventDefault();
+		if (busy) return;
 		busy = true;
 		localStatus = undefined;
-		await teacherFlow.saveCourse(
-			{ workspaceId: teacherFlow.workspaceId, name, subject, colorToken },
-			current
-		);
-		busy = false;
-		localStatus = teacherFlow.status ?? undefined;
+		try {
+			await teacherFlow.saveCourse(
+				{ workspaceId: teacherFlow.workspaceId, name, subject, colorToken },
+				current
+			);
+			localStatus = teacherFlow.status ?? undefined;
+		} finally {
+			busy = false;
+		}
 	}
 
-	async function archive() {
-		if (!current || !window.confirm(`Archiver « ${current.name} » ?`)) return;
+	function requestArchive() {
+		if (!current || busy) return;
+		archiveOpen = true;
+	}
+
+	async function confirmArchive() {
+		if (!current || busy) return;
 		busy = true;
 		localStatus = undefined;
-		await teacherFlow.archiveCourse(current);
-		busy = false;
-		localStatus = teacherFlow.status ?? undefined;
+		try {
+			await teacherFlow.archiveCourse(current);
+			localStatus = teacherFlow.status ?? undefined;
+			archiveOpen = false;
+		} finally {
+			busy = false;
+		}
 	}
 
-	async function remove() {
-		if (!current) return;
-		const sessions = teacherFlow.snapshot.sessions.filter(
-			(session) => session.courseId === current.id
-		);
-		const sessionIds = new Set(sessions.map(({ id }) => id));
-		const observations = teacherFlow.snapshot.observations.filter((observation) =>
-			sessionIds.has(observation.sessionId)
-		);
-		const observationIds = new Set(observations.map(({ id }) => id));
-		const decisions = teacherFlow.snapshot.decisions.filter((decision) =>
-			observationIds.has(decision.observationId)
-		);
-		if (
-			!window.confirm(
-				`Supprimer ${current.name} et ${sessions.length} séance(s), ${observations.length} observation(s), ${decisions.length} décision(s) ?`
-			)
-		)
-			return;
+	function requestRemove() {
+		if (!current || busy) return;
+		const intent = planCourseDeletion(teacherFlow.snapshot, current.id);
+		deletionCounts = {
+			sessions: intent.delete.sessionIds.length,
+			observations: intent.delete.observationIds.length,
+			decisions: intent.delete.decisionIds.length,
+			cleared: intent.clearDecisionTargetIds.length
+		};
+		deleteOpen = true;
+	}
+
+	async function confirmRemove() {
+		if (!current || busy) return;
 		busy = true;
-		await teacherFlow.deleteCourse(current.id);
-		busy = false;
+		try {
+			await teacherFlow.deleteCourse(current.id);
+			deleteOpen = false;
+		} finally {
+			busy = false;
+		}
 	}
 </script>
 
-<form class="entity-form" onsubmit={submit} aria-labelledby="course-form-title">
+<form class="entity-form" onsubmit={submit} aria-labelledby={titleId}>
 	<div class="form-heading">
 		<div>
 			<p class="card-kicker">{current ? 'Modifier le contexte' : 'Première étape'}</p>
-			<h2 id="course-form-title">{current ? 'Votre cours' : 'Créer un cours'}</h2>
+			<h2 id={titleId}>{current ? 'Votre cours' : 'Créer un cours'}</h2>
 		</div>
 	</div>
 	<label>
@@ -91,13 +113,49 @@
 			{current ? 'Enregistrer le cours' : 'Créer le cours'}
 		</button>
 		{#if current && !current.archivedAt}
-			<button class="button button--quiet" type="button" disabled={busy} onclick={archive}>
+			<button
+				bind:this={archiveTrigger}
+				class="button button--quiet"
+				type="button"
+				disabled={busy}
+				onclick={requestArchive}
+			>
 				Archiver ce cours
 			</button>
-			<button class="button button--quiet" type="button" disabled={busy} onclick={remove}
-				>Supprimer ce cours</button
+			<button
+				bind:this={deleteTrigger}
+				class="button button--quiet"
+				type="button"
+				disabled={busy}
+				onclick={requestRemove}>Supprimer ce cours</button
 			>
 		{/if}
 	</div>
 	<StatusMessage kind={localStatus?.kind ?? 'info'} message={localStatus?.message} />
 </form>
+
+{#if current}
+	<ConfirmDialog
+		id={`course-archive-${current.id}`}
+		open={archiveOpen}
+		title={`Archiver « ${current.name} » ?`}
+		description="Le cours disparaîtra des contextes actifs, mais toutes ses données resteront conservées."
+		confirmLabel="Archiver ce cours"
+		{busy}
+		returnFocus={archiveTrigger}
+		onconfirm={confirmArchive}
+		oncancel={() => (archiveOpen = false)}
+	/>
+	<ConfirmDialog
+		id={`course-delete-${current.id}`}
+		open={deleteOpen}
+		title={`Supprimer « ${current.name} » ?`}
+		description={`${count(deletionCounts.sessions, 'séance', 'séances')}, ${count(deletionCounts.observations, 'observation', 'observations')} et ${count(deletionCounts.decisions, 'décision liée', 'décisions liées')} seront supprimées définitivement.${deletionCounts.cleared ? ` ${count(deletionCounts.cleared, 'autre décision', 'autres décisions')} ${deletionCounts.cleared === 1 ? 'perdra sa' : 'perdront leur'} séance cible.` : ''}`}
+		confirmLabel="Supprimer ce cours"
+		danger={true}
+		{busy}
+		returnFocus={deleteTrigger}
+		onconfirm={confirmRemove}
+		oncancel={() => (deleteOpen = false)}
+	/>
+{/if}

@@ -13,29 +13,56 @@
 	import { TEACHERFLOW_APP_VERSION } from '$lib/teacherflow/version';
 
 	const teacherFlow = getTeacherFlowState();
-	let preview = $state<TeacherFlowBackup>();
+	let preview = $state.raw<TeacherFlowBackup>();
 	let importError = $state<string>();
 	let resetPersonal = $state(false);
 	let resetDemo = $state(false);
+	let busy = $state(false);
+	let resetPersonalTrigger = $state<HTMLButtonElement>();
+	let resetDemoTrigger = $state<HTMLButtonElement>();
+	const count = (value: number, singular: string, plural: string) =>
+		`${value} ${value === 1 ? singular : plural}`;
+	const snapshotCounts = () =>
+		[
+			count(teacherFlow.snapshot.courses.length, 'cours', 'cours'),
+			count(teacherFlow.snapshot.sessions.length, 'séance', 'séances'),
+			count(teacherFlow.snapshot.observations.length, 'observation', 'observations'),
+			count(teacherFlow.snapshot.decisions.length, 'décision', 'décisions')
+		].join(', ');
 
 	async function usePersonal() {
-		await teacherFlow.switchWorkspace(PERSONAL_WORKSPACE_ID);
+		if (busy) return;
+		busy = true;
+		try {
+			await teacherFlow.switchWorkspace(PERSONAL_WORKSPACE_ID);
+		} finally {
+			busy = false;
+		}
 	}
 
-	function download() {
+	async function download() {
+		if (busy) return;
+		busy = true;
+		importError = undefined;
+		let href: string | undefined;
 		try {
 			const backup = exportWorkspace(teacherFlow.snapshot, TEACHERFLOW_APP_VERSION);
 			const blob = new Blob([serializeTeacherFlowBackup(backup)], { type: 'application/json' });
-			const href = URL.createObjectURL(blob);
+			href = URL.createObjectURL(blob);
 			const link = document.createElement('a');
 			link.href = href;
 			link.download = `teacherflow-backup-${backup.exportedAt.slice(0, 10)}.json`;
 			link.click();
-			void teacherFlow.markPersonalExportedAt(backup.exportedAt);
-			setTimeout(() => URL.revokeObjectURL(href), 0);
+			await teacherFlow.markPersonalExportedAt(backup.exportedAt);
 		} catch {
 			importError =
 				'L’export n’a pas pu être préparé. Vos données existantes n’ont pas été modifiées.';
+		} finally {
+			if (href) {
+				const objectUrl = href;
+				setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+			}
+			busy = false;
 		}
 	}
 
@@ -44,30 +71,62 @@
 		preview = undefined;
 		importError = undefined;
 		if (!file) return;
-		if (file.size > TEACHERFLOW_BACKUP_MAX_BYTES) {
-			importError = 'File exceeds the 1 MB import limit.';
-			return;
-		}
-		let parsed;
+		busy = true;
 		try {
-			parsed = parseTeacherFlowBackup(await file.text());
-		} catch {
-			importError = 'File could not be read. Retry with a valid local backup.';
-			return;
+			if (file.size > TEACHERFLOW_BACKUP_MAX_BYTES) {
+				importError = 'File exceeds the 1 MB import limit.';
+				return;
+			}
+			let parsed;
+			try {
+				parsed = parseTeacherFlowBackup(await file.text());
+			} catch {
+				importError = 'File could not be read. Retry with a valid local backup.';
+				return;
+			}
+			if (!parsed.ok) {
+				importError =
+					parsed.reason === 'too_large'
+						? 'Ce fichier dépasse la taille maximale autorisée.'
+						: 'Ce fichier n’est pas une sauvegarde TeacherFlow valide.';
+				return;
+			}
+			preview = parsed.value;
+		} finally {
+			busy = false;
 		}
-		if (!parsed.ok) {
-			importError =
-				parsed.reason === 'too_large'
-					? 'Ce fichier dépasse la taille maximale autorisée.'
-					: 'Ce fichier n’est pas une sauvegarde TeacherFlow valide.';
-			return;
-		}
-		preview = parsed.value;
 	}
 
 	async function restoreImport() {
-		if (!preview) return;
-		if (await teacherFlow.replacePersonal(preview)) preview = undefined;
+		if (!preview || busy) return;
+		busy = true;
+		try {
+			if (await teacherFlow.replacePersonal(preview)) preview = undefined;
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function confirmDemoReset() {
+		if (busy) return;
+		busy = true;
+		try {
+			await teacherFlow.resetDemo();
+			resetDemo = false;
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function confirmPersonalReset() {
+		if (busy) return;
+		busy = true;
+		try {
+			await teacherFlow.resetPersonal();
+			resetPersonal = false;
+		} finally {
+			busy = false;
+		}
 	}
 </script>
 
@@ -89,45 +148,37 @@
 			<h2>Données de démonstration</h2>
 			<p>Le contenu est fictif. Vous pouvez le régénérer sans toucher à votre espace personnel.</p>
 			<div class="form-actions">
-				<button class="button button--secondary" type="button" onclick={() => (resetDemo = true)}
-					>Réinitialiser la démonstration</button
-				><button class="button button--primary" type="button" onclick={usePersonal}
+				<button
+					bind:this={resetDemoTrigger}
+					class="button button--secondary"
+					type="button"
+					disabled={busy}
+					onclick={() => (resetDemo = true)}>Réinitialiser la démonstration</button
+				><button class="button button--primary" type="button" disabled={busy} onclick={usePersonal}
 					>Utiliser mon espace personnel</button
 				>
 			</div>
-			{#if teacherFlow.lastExportedAt}
-				<p>
-					Dernier export : {new Date(teacherFlow.lastExportedAt).toLocaleString('fr-FR')}. {teacherFlow.snapshot.courses.some(
-						(course) => course.updatedAt > teacherFlow.lastExportedAt!
-					) ||
-					teacherFlow.snapshot.sessions.some(
-						(session) => session.updatedAt > teacherFlow.lastExportedAt!
-					) ||
-					teacherFlow.snapshot.observations.some(
-						(observation) => observation.updatedAt > teacherFlow.lastExportedAt!
-					) ||
-					teacherFlow.snapshot.decisions.some(
-						(decision) => decision.updatedAt > teacherFlow.lastExportedAt!
-					)
-						? 'Des modifications existent depuis cet export.'
-						: 'Aucune modification depuis cet export.'}
-				</p>
-			{:else}<p>Aucun export enregistré sur cet appareil.</p>{/if}
 		</section>
 	{:else}
-		<p class="quiet-note">
+		<p class="quiet-note" aria-live="polite">
 			{teacherFlow.lastExportedAt
-				? `Dernier export : ${new Date(teacherFlow.lastExportedAt).toLocaleString('fr-FR')}. ${teacherFlow.snapshot.courses.some((course) => course.updatedAt > teacherFlow.lastExportedAt!) || teacherFlow.snapshot.sessions.some((session) => session.updatedAt > teacherFlow.lastExportedAt!) || teacherFlow.snapshot.observations.some((observation) => observation.updatedAt > teacherFlow.lastExportedAt!) || teacherFlow.snapshot.decisions.some((decision) => decision.updatedAt > teacherFlow.lastExportedAt!) ? 'Des modifications existent depuis cet export.' : 'Aucune modification depuis cet export.'}`
+				? `Dernier export : ${new Date(teacherFlow.lastExportedAt).toLocaleString('fr-FR')}. ${teacherFlow.hasChangesSinceLastExport ? 'Des modifications existent depuis cet export.' : 'Aucune modification depuis cet export.'}`
 				: 'Aucun export enregistré sur cet appareil.'}
 		</p>
 		<section class="management-section">
 			<h2>Sauvegarder votre espace personnel</h2>
 			<p>
-				{teacherFlow.snapshot.courses.length} cours · {teacherFlow.snapshot.sessions.length} séances ·
-				{teacherFlow.snapshot.observations.length} observations · {teacherFlow.snapshot.decisions
-					.length} décisions
+				{count(teacherFlow.snapshot.courses.length, 'cours', 'cours')} · {count(
+					teacherFlow.snapshot.sessions.length,
+					'séance',
+					'séances'
+				)} · {count(teacherFlow.snapshot.observations.length, 'observation', 'observations')} · {count(
+					teacherFlow.snapshot.decisions.length,
+					'décision',
+					'décisions'
+				)}
 			</p>
-			<button class="button button--primary" type="button" onclick={download}
+			<button class="button button--primary" type="button" disabled={busy} onclick={download}
 				>Exporter mes données</button
 			>
 		</section>
@@ -142,6 +193,7 @@
 				>Fichier de sauvegarde TeacherFlow <input
 					type="file"
 					accept="application/json,.json"
+					disabled={busy}
 					onchange={previewImport}
 				/></label
 			>
@@ -152,12 +204,21 @@
 				<section class="import-preview" aria-live="polite">
 					<h3>Aperçu avant remplacement</h3>
 					<p>
-						Exportée le {new Date(preview.exportedAt).toLocaleString('fr-FR')} · {preview.courses
-							.length} cours · {preview.sessions.length} séances · {preview.observations.length} observations
-						· {preview.decisions.length} décisions.
+						Exportée le {new Date(preview.exportedAt).toLocaleString('fr-FR')} · {count(
+							preview.courses.length,
+							'cours',
+							'cours'
+						)} · {count(preview.sessions.length, 'séance', 'séances')} · {count(
+							preview.observations.length,
+							'observation',
+							'observations'
+						)} · {count(preview.decisions.length, 'décision', 'décisions')}.
 					</p>
-					<button class="button button--primary" type="button" onclick={restoreImport}
-						>Remplacer mon espace avec cette sauvegarde</button
+					<button
+						class="button button--primary"
+						type="button"
+						disabled={busy}
+						onclick={restoreImport}>Remplacer mon espace avec cette sauvegarde</button
 					>
 				</section>
 			{/if}
@@ -169,8 +230,12 @@
 				Cette action supprime cours, séances, observations, décisions et sauvegardes de récupération
 				de cet appareil.
 			</p>
-			<button class="button button--quiet" type="button" onclick={() => (resetPersonal = true)}
-				>Réinitialiser mes données</button
+			<button
+				bind:this={resetPersonalTrigger}
+				class="button button--quiet"
+				type="button"
+				disabled={busy}
+				onclick={() => (resetPersonal = true)}>Réinitialiser mes données</button
 			>
 		</section>
 	{/if}
@@ -181,25 +246,23 @@
 	id="data-reset-demo"
 	open={resetDemo}
 	title="Régénérer les données de démonstration ?"
-	description="Les modifications apportées aux données fictives seront remplacées par le scénario de démonstration."
+	description={`${snapshotCounts()} seront remplacés par le scénario de démonstration d’origine.`}
 	confirmLabel="Régénérer la démonstration"
-	onconfirm={async () => {
-		await teacherFlow.resetDemo();
-		resetDemo = false;
-	}}
+	{busy}
+	returnFocus={resetDemoTrigger}
+	onconfirm={confirmDemoReset}
 	oncancel={() => (resetDemo = false)}
 />
 <ConfirmDialog
 	id="data-reset-personal"
 	open={resetPersonal}
 	title="Supprimer toutes vos données locales ?"
-	description="Cours, séances, observations, décisions et sauvegardes de récupération seront supprimés de cet appareil. Cette action ne peut pas être annulée."
+	description={`${snapshotCounts()}, ainsi que les sauvegardes de récupération associées, seront supprimés de cet appareil. Cette action ne peut pas être annulée.`}
 	confirmLabel="Supprimer définitivement"
 	danger={true}
 	typedPhrase="SUPPRIMER"
-	onconfirm={async () => {
-		await teacherFlow.resetPersonal();
-		resetPersonal = false;
-	}}
+	{busy}
+	returnFocus={resetPersonalTrigger}
+	onconfirm={confirmPersonalReset}
 	oncancel={() => (resetPersonal = false)}
 />

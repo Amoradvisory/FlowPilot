@@ -74,6 +74,7 @@ function repository(workspaceId: string, snapshot = empty(workspaceId)): Teacher
 			current = next;
 		},
 		lastPersonalExportedAt: async () => undefined,
+		hasPersonalChangesSinceLastExport: async () => false,
 		markPersonalExportedAt: async () => {},
 		clearWorkspace: async () => {
 			current = empty(workspaceId);
@@ -266,6 +267,59 @@ describe('TeacherFlow state controller', () => {
 		await state.switchWorkspace(PERSONAL_WORKSPACE_ID);
 		await state.resetPersonal();
 		expect(state.snapshot).toEqual(empty(PERSONAL_WORKSPACE_ID));
+	});
+
+	it('keeps personal export status visible and marks deletion, import, and reset as changes', async () => {
+		const exportedAt = '2026-08-15T08:55:00.000Z';
+		const personal = repository(PERSONAL_WORKSPACE_ID, {
+			...empty(PERSONAL_WORKSPACE_ID),
+			courses: [
+				{
+					id: 'course',
+					workspaceId: PERSONAL_WORKSPACE_ID,
+					name: 'Mathématiques',
+					colorToken: 'indigo',
+					createdAt: '2026-08-15T08:00:00.000Z',
+					updatedAt: '2026-08-15T08:00:00.000Z'
+				}
+			]
+		});
+		personal.lastPersonalExportedAt = async () => exportedAt;
+		personal.hasPersonalChangesSinceLastExport = async () => false;
+		const demo = repository(DEMO_WORKSPACE_ID);
+		const state = createTeacherFlowState({
+			repositoryFactory: async (workspaceId) =>
+				workspaceId === PERSONAL_WORKSPACE_ID ? personal : demo,
+			clock
+		});
+
+		await state.switchWorkspace(PERSONAL_WORKSPACE_ID);
+		expect(state.lastExportedAt).toBe(exportedAt);
+		expect(state.hasChangesSinceLastExport).toBe(false);
+
+		await state.deleteCourse('course');
+		expect(state.lastExportedAt).toBe(exportedAt);
+		expect(state.hasChangesSinceLastExport).toBe(true);
+
+		await state.markPersonalExportedAt('2026-08-15T09:00:00.000Z');
+		expect(state.hasChangesSinceLastExport).toBe(false);
+		await state.replacePersonal({
+			workspaceId: PERSONAL_WORKSPACE_ID,
+			courses: [],
+			sessions: [],
+			observations: [],
+			decisions: []
+		});
+		expect(state.hasChangesSinceLastExport).toBe(true);
+
+		await state.markPersonalExportedAt('2026-08-15T09:01:00.000Z');
+		await state.resetPersonal();
+		expect(state.lastExportedAt).toBe('2026-08-15T09:01:00.000Z');
+		expect(state.hasChangesSinceLastExport).toBe(true);
+
+		await state.switchWorkspace(DEMO_WORKSPACE_ID);
+		expect(state.lastExportedAt).toBeUndefined();
+		expect(state.hasChangesSinceLastExport).toBe(false);
 	});
 
 	it('ignores an old workspace save after switching while its write is pending', async () => {

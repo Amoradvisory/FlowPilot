@@ -49,11 +49,20 @@ export interface TeacherFlowRepository {
 	/** Validates first, then writes a recoverable pre-import copy and replacement in one transaction. */
 	importPersonalWorkspace(snapshot: WorkspaceSnapshot, appVersion: string): Promise<void>;
 	lastPersonalExportedAt(): Promise<string | undefined>;
+	hasPersonalChangesSinceLastExport(): Promise<boolean>;
 	markPersonalExportedAt(exportedAt: string): Promise<void>;
 	clearWorkspace(): Promise<void>;
 	/** Atomically seeds only a new demo workspace; a durable marker makes this idempotent. */
 	ensureDemoSeed(snapshot: WorkspaceSnapshot): Promise<void>;
 }
+
+interface PersonalExportRecord {
+	readonly exportedAt: string;
+	readonly revision: number;
+}
+
+const PERSONAL_EXPORT_KEY = 'last-personal-export';
+const PERSONAL_REVISION_KEY = 'personal-revision';
 
 export interface ObservationDecisionEdit {
 	readonly observationId: EntityId;
@@ -90,6 +99,7 @@ export interface OpenTeacherFlowRepositoryOptions {
 	now?: () => Date;
 	migrationAfterFirstWrite?: LegacyMigrationOptions['afterFirstWrite'];
 	afterLinkedWrite?: () => void | Promise<void>;
+	afterImportClear?: () => void | Promise<void>;
 }
 
 function ordered<T extends { id: string }>(values: T[]): T[] {
@@ -101,7 +111,8 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 		readonly workspaceId: WorkspaceId,
 		private readonly database: TeacherFlowDatabase,
 		readonly migration: MigrationResult,
-		private readonly afterLinkedWrite?: () => void | Promise<void>
+		private readonly afterLinkedWrite?: () => void | Promise<void>,
+		private readonly afterImportClear?: () => void | Promise<void>
 	) {}
 
 	async load(): Promise<WorkspaceSnapshot> {
@@ -182,8 +193,10 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 			};
 			validateWorkspaceSnapshot(next);
 			await this.database.observations.put(observation);
-			await this.afterLinkedWrite?.();
-			if (decision) await this.database.decisions.put(decision);
+			if (decision) {
+				await this.afterLinkedWrite?.();
+				await this.database.decisions.put(decision);
+			}
 			result = decision ? { observation, decision } : { observation };
 		});
 		return result!;
@@ -332,6 +345,7 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 				createdAt
 			});
 			await this.removeWorkspace();
+			await this.afterImportClear?.();
 			await this.database.courses.bulkPut(snapshot.courses);
 			await this.database.sessions.bulkPut(snapshot.sessions);
 			await this.database.observations.bulkPut(snapshot.observations);
@@ -341,8 +355,27 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 
 	async lastPersonalExportedAt(): Promise<string | undefined> {
 		if (this.workspaceId !== 'personal') return undefined;
-		const record = await this.database.meta.get([this.workspaceId, 'last-personal-export']);
-		return typeof record?.value === 'string' ? record.value : undefined;
+		const record = await this.database.meta.get([this.workspaceId, PERSONAL_EXPORT_KEY]);
+		if (typeof record?.value === 'string') return record.value;
+		return isPersonalExportRecord(record?.value) ? record.value.exportedAt : undefined;
+	}
+
+	async hasPersonalChangesSinceLastExport(): Promise<boolean> {
+		if (this.workspaceId !== 'personal') return false;
+		const record = await this.database.meta.get([this.workspaceId, PERSONAL_EXPORT_KEY]);
+		if (!record) return false;
+		const revision = await this.personalRevision();
+		if (isPersonalExportRecord(record.value)) return revision !== record.value.revision;
+		if (typeof record.value !== 'string') return false;
+		if (revision > 0) return true;
+		const exportedAt = record.value;
+		const snapshot = await this.read();
+		return [
+			...snapshot.courses,
+			...snapshot.sessions,
+			...snapshot.observations,
+			...snapshot.decisions
+		].some(({ updatedAt }) => updatedAt > exportedAt);
 	}
 
 	async markPersonalExportedAt(exportedAt: string): Promise<void> {
@@ -357,13 +390,14 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 		if (canonical !== exportedAt)
 			throw new DomainError('invalid_date', 'exportedAt must be a valid date', 'exportedAt');
 		await this.write(async () => {
+			const revision = await this.personalRevision();
 			await this.database.meta.put({
 				workspaceId: this.workspaceId,
-				key: 'last-personal-export',
-				value: exportedAt,
+				key: PERSONAL_EXPORT_KEY,
+				value: { exportedAt, revision } satisfies PersonalExportRecord,
 				updatedAt: exportedAt
 			});
-		});
+		}, false);
 	}
 
 	async clearWorkspace(): Promise<void> {
@@ -452,7 +486,10 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 		});
 	}
 
-	private async write(operation: (snapshot: WorkspaceSnapshot) => Promise<void>): Promise<void> {
+	private async write(
+		operation: (snapshot: WorkspaceSnapshot) => Promise<void>,
+		tracksPersonalMutation = true
+	): Promise<void> {
 		try {
 			await this.database.transaction(
 				'rw',
@@ -464,12 +501,31 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 					this.database.meta,
 					this.database.recoveryBackups
 				],
-				async () => operation(await this.read())
+				async () => {
+					await operation(await this.read());
+					if (tracksPersonalMutation && this.workspaceId === 'personal') {
+						const revision = (await this.personalRevision()) + 1;
+						await this.database.meta.put({
+							workspaceId: this.workspaceId,
+							key: PERSONAL_REVISION_KEY,
+							value: revision,
+							updatedAt: new Date().toISOString()
+						});
+					}
+				}
 			);
 		} catch (error) {
 			if (error instanceof DomainError || error instanceof BackupError) throw error;
 			throw mapStorageError(error);
 		}
+	}
+
+	private async personalRevision(): Promise<number> {
+		if (this.workspaceId !== 'personal') return 0;
+		const record = await this.database.meta.get([this.workspaceId, PERSONAL_REVISION_KEY]);
+		return typeof record?.value === 'number' && Number.isSafeInteger(record.value)
+			? record.value
+			: 0;
 	}
 
 	private async read(): Promise<WorkspaceSnapshot> {
@@ -506,6 +562,18 @@ class DexieTeacherFlowRepository implements TeacherFlowRepository {
 			);
 		}
 	}
+}
+
+function isPersonalExportRecord(value: unknown): value is PersonalExportRecord {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		'exportedAt' in value &&
+		typeof value.exportedAt === 'string' &&
+		'revision' in value &&
+		typeof value.revision === 'number' &&
+		Number.isSafeInteger(value.revision)
+	);
 }
 
 function replace<T extends { id: string }>(values: readonly T[], entity: T): T[] {
@@ -545,7 +613,8 @@ export async function openTeacherFlowRepository(
 			workspaceId,
 			database,
 			migration,
-			options.afterLinkedWrite
+			options.afterLinkedWrite,
+			options.afterImportClear
 		);
 	} catch (error) {
 		throw mapStorageError(error);

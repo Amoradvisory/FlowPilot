@@ -53,6 +53,7 @@ export interface TeacherFlowState {
 	readonly draft?: ObservationFlowDraft;
 	readonly status?: TeacherFlowStatus;
 	readonly lastExportedAt?: string;
+	readonly hasChangesSinceLastExport: boolean;
 	readonly today: ReturnType<typeof selectToday>;
 	memory(filters: MemoryFilters): ReturnType<typeof selectMemory>;
 	hydrate(): Promise<void>;
@@ -112,7 +113,8 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 		['phase', 'loading' satisfies TeacherFlowPhase],
 		['workspaceId', DEMO_WORKSPACE_ID],
 		['snapshot', emptySnapshot(DEMO_WORKSPACE_ID)],
-		['lastExportedAt', undefined]
+		['lastExportedAt', undefined],
+		['hasChangesSinceLastExport', false]
 	]);
 	let repository: TeacherFlowRepository | undefined;
 	let workspaceEpoch = 0;
@@ -225,7 +227,8 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 
 	function enqueueMutation(
 		retainedDraft: ObservationFlowDraft | undefined,
-		action: (context: MutationContext) => Promise<void>
+		action: (context: MutationContext) => Promise<void>,
+		marksExportDirty = true
 	): Promise<boolean> {
 		const draftToRetain =
 			retainedDraft && isDraftFromActiveWorkspace(retainedDraft) ? retainedDraft : undefined;
@@ -240,7 +243,6 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 			return Promise.resolve(false);
 		}
 		write('status', undefined);
-		write('lastExportedAt', undefined);
 		const run = mutationQueue.then(async () => {
 			let committed = false;
 			try {
@@ -248,6 +250,14 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 				committed = true;
 				markWorkspaceCommitted(context.workspaceId);
 				await refreshActiveWorkspaceAfterCommit(context.workspaceId);
+				if (
+					marksExportDirty &&
+					context.workspaceId === PERSONAL_WORKSPACE_ID &&
+					belongsToActiveWorkspace(context) &&
+					read<string | undefined>('lastExportedAt') !== undefined
+				) {
+					write('hasChangesSinceLastExport', true);
+				}
 				if (!isLatestMutation(context)) return false;
 				write('draft', undefined);
 				write('status', {
@@ -281,6 +291,8 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 		write('snapshot', emptySnapshot(nextWorkspaceId));
 		write('draft', undefined);
 		write('status', undefined);
+		write('lastExportedAt', undefined);
+		write('hasChangesSinceLastExport', false);
 		write('phase', 'loading' satisfies TeacherFlowPhase);
 		repository = undefined;
 		try {
@@ -305,8 +317,14 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 				activationIsCurrent(epoch, nextWorkspaceId) &&
 				nextWorkspaceId === PERSONAL_WORKSPACE_ID
 			) {
-				const lastExportedAt = await nextRepository.lastPersonalExportedAt();
-				if (activationIsCurrent(epoch, nextWorkspaceId)) write('lastExportedAt', lastExportedAt);
+				const [lastExportedAt, hasChangesSinceLastExport] = await Promise.all([
+					nextRepository.lastPersonalExportedAt(),
+					nextRepository.hasPersonalChangesSinceLastExport()
+				]);
+				if (activationIsCurrent(epoch, nextWorkspaceId)) {
+					write('lastExportedAt', lastExportedAt);
+					write('hasChangesSinceLastExport', hasChangesSinceLastExport);
+				}
 			}
 		} catch (error) {
 			if (!activationIsCurrent(epoch, nextWorkspaceId)) return;
@@ -336,6 +354,9 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 		},
 		get lastExportedAt() {
 			return read<string | undefined>('lastExportedAt');
+		},
+		get hasChangesSinceLastExport() {
+			return read<boolean>('hasChangesSinceLastExport');
 		},
 		get today() {
 			return selectToday(read<WorkspaceSnapshot>('snapshot'), options.clock());
@@ -490,10 +511,15 @@ export function createTeacherFlowState(options: TeacherFlowStateOptions): Teache
 		},
 		async markPersonalExportedAt(exportedAt) {
 			if (read<TeacherFlowWorkspaceId>('workspaceId') !== PERSONAL_WORKSPACE_ID) return false;
-			const saved = await enqueueMutation(undefined, (context) =>
-				context.repository.markPersonalExportedAt(exportedAt)
+			const saved = await enqueueMutation(
+				undefined,
+				(context) => context.repository.markPersonalExportedAt(exportedAt),
+				false
 			);
-			if (saved) write('lastExportedAt', exportedAt);
+			if (saved) {
+				write('lastExportedAt', exportedAt);
+				write('hasChangesSinceLastExport', false);
+			}
 			return saved;
 		}
 	};

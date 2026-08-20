@@ -21,7 +21,7 @@
 		busy?: boolean;
 		typedPhrase?: string;
 		returnFocus?: HTMLElement;
-		onconfirm: () => void;
+		onconfirm: () => void | Promise<void>;
 		oncancel: () => void;
 	} = $props();
 	let dialog = $state<HTMLDialogElement>();
@@ -36,11 +36,17 @@
 		if (!open) confirmation = '';
 	});
 
-	function cancel() {
+	function cancel(event?: Event) {
+		event?.preventDefault();
 		if (!busy) oncancel();
 	}
 	function close() {
-		returnFocus?.focus();
+		queueMicrotask(() => {
+			const target = returnFocus?.isConnected
+				? returnFocus
+				: document.querySelector<HTMLElement>('#teacherflow-main');
+			target?.focus();
+		});
 	}
 </script>
 
@@ -51,7 +57,12 @@
 	oncancel={cancel}
 	onclose={close}
 >
-	<form method="dialog" class="confirm-dialog" onsubmit={(event) => event.preventDefault()}>
+	<form
+		method="dialog"
+		class="confirm-dialog"
+		aria-busy={busy}
+		onsubmit={(event) => event.preventDefault()}
+	>
 		<h2 id={`${id}-title`}>{title}</h2>
 		<p id={`${id}-description`}>{description}</p>
 		{#if typedPhrase}<label

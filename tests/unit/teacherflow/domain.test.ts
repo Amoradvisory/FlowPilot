@@ -467,6 +467,12 @@ describe('TeacherFlow domain commands', () => {
 		);
 	});
 
+	it('increments a decision timestamp by one millisecond only when the clock is equal', () => {
+		const decision = makeSnapshot().decisions[0];
+		const updated = updateDecisionStatus(decision, 'applied', () => new Date(decision.updatedAt));
+		expect(updated.updatedAt).toBe('2026-08-15T07:00:00.001Z');
+	});
+
 	it('rejects a malformed incoming decision before evaluating its transition', () => {
 		const base = makeSnapshot().decisions[1];
 		for (const decision of [
@@ -798,7 +804,26 @@ describe('TeacherFlow relationship invariants and deletion intents', () => {
 });
 
 describe('TeacherFlow monotonic editing', () => {
-	it('moves an observation timestamp forward when the clock has not advanced', () => {
+	it('rejects an observation timestamp earlier than the entity state', () => {
+		const observation = makeSnapshot().observations[0]!;
+		expectDomainError(
+			() =>
+				updateObservation(
+					observation,
+					{
+						workspaceId: observation.workspaceId,
+						sessionId: observation.sessionId,
+						signal: observation.signal,
+						note: observation.note
+					},
+					() => new Date('2026-08-14T10:29:59.999Z')
+				),
+			'invalid_date_order',
+			'now'
+		);
+	});
+
+	it('increments an observation timestamp by one millisecond only when the clock is equal', () => {
 		const observation = makeSnapshot().observations[0]!;
 		const updated = updateObservation(
 			observation,
@@ -810,7 +835,7 @@ describe('TeacherFlow monotonic editing', () => {
 			},
 			() => new Date(observation.updatedAt)
 		);
-		expect(updated.updatedAt).toBe('2026-08-15T07:00:00.001Z');
+		expect(updated.updatedAt).toBe('2026-08-14T10:30:00.001Z');
 	});
 });
 

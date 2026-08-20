@@ -151,6 +151,6 @@ describe('TeacherFlow personal backup', () => {
 			observationId: observation.id
 		}));
 		const backup = exportWorkspace({ ...snapshot, observations, decisions }, '1');
-		expect(() => serializeTeacherFlowBackup(backup)).toThrow(/maximum/u);
+		expect(() => serializeTeacherFlowBackup(backup)).toThrow(/taille maximale/u);
 	});
 });

@@ -19,6 +19,12 @@
 	let chronology = $state<HTMLElement>();
 	let busy = $state(false);
 	const entries = $derived(teacherFlow.memory(filters));
+	const deletingDecisionCount = $derived(
+		deleting
+			? teacherFlow.snapshot.decisions.filter((decision) => decision.observationId === deleting!.id)
+					.length
+			: 0
+	);
 	const groups = $derived.by(() => {
 		const indexed = new Map<
 			string,
@@ -54,35 +60,46 @@
 	async function saveEdit(decision?: Decision) {
 		if (!editing || busy) return;
 		busy = true;
-		const saved = await teacherFlow.editObservationWithDecision(
-			{
-				workspaceId: teacherFlow.workspaceId,
-				sessionId: editing.sessionId,
-				signal: editing.signal,
-				note
-			},
-			editing,
-			decision,
-			decisionText
-		);
-		busy = false;
-		if (saved) editing = undefined;
+		try {
+			const saved = await teacherFlow.editObservationWithDecision(
+				{
+					workspaceId: teacherFlow.workspaceId,
+					sessionId: editing.sessionId,
+					signal: editing.signal,
+					note
+				},
+				editing,
+				decision,
+				decisionText
+			);
+			if (saved) editing = undefined;
+		} finally {
+			busy = false;
+		}
 	}
 
 	async function confirmDelete() {
 		if (!deleting || busy) return;
+		const deletingId = deleting.id;
 		busy = true;
-		await teacherFlow.deleteObservation(deleting.id);
-		busy = false;
-		deleting = undefined;
-		chronology?.focus();
+		try {
+			await teacherFlow.deleteObservation(deletingId);
+			if (!teacherFlow.snapshot.observations.some(({ id }) => id === deletingId)) {
+				deleting = undefined;
+			}
+		} finally {
+			busy = false;
+		}
 	}
 
 	async function advance(decision: Decision) {
 		if (busy) return;
 		busy = true;
-		await teacherFlow.advanceDecision(decision);
-		busy = false;
+		try {
+			await teacherFlow.advanceDecision(decision);
+		} finally {
+			busy = false;
+		}
 	}
 </script>
 
@@ -183,6 +200,7 @@
 										><button
 											class="button button--quiet"
 											type="button"
+											disabled={busy}
 											onclick={() => (editing = undefined)}>Annuler</button
 										>
 									</div>
@@ -201,10 +219,14 @@
 	open={deleting !== undefined}
 	title="Supprimer cette observation ?"
 	description={deleting
-		? `Cette observation${teacherFlow.snapshot.decisions.some((decision) => decision.observationId === deleting!.id) ? ' et sa décision liée' : ''} seront supprimées définitivement de cet appareil.`
+		? deletingDecisionCount === 0
+			? 'Cette observation sera supprimée définitivement de cet appareil.'
+			: `Cette observation et ${deletingDecisionCount} ${deletingDecisionCount === 1 ? 'décision liée' : 'décisions liées'} seront supprimées définitivement de cet appareil.`
 		: ''}
 	confirmLabel="Supprimer définitivement"
 	danger={true}
+	{busy}
+	returnFocus={chronology}
 	onconfirm={confirmDelete}
 	oncancel={() => (deleting = undefined)}
 />

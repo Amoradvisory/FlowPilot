@@ -41,9 +41,12 @@ function timestamp(clock: Clock): string {
 
 function strictlyAfter(previous: string, clock: Clock): string {
 	const now = timestamp(clock);
-	return new Date(
-		Math.max(Date.parse(now), Date.parse(isoUtc(previous, 'updatedAt')) + 1)
-	).toISOString();
+	const previousTime = Date.parse(isoUtc(previous, 'updatedAt'));
+	const nowTime = Date.parse(now);
+	if (nowTime < previousTime) {
+		throw new DomainError('invalid_date_order', 'now cannot precede updatedAt', 'now');
+	}
+	return nowTime === previousTime ? new Date(previousTime + 1).toISOString() : now;
 }
 
 export function createCourse(

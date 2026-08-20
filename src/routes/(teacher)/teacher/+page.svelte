@@ -13,13 +13,6 @@
 	const activeCourses = $derived(
 		teacherFlow.snapshot.courses.filter((course) => !course.archivedAt)
 	);
-	const activeCourse = $derived(activeCourses[0]);
-	const courseSessions = $derived(
-		activeCourse
-			? teacherFlow.snapshot.sessions.filter((session) => session.courseId === activeCourse.id)
-			: []
-	);
-	const firstSession = $derived(courseSessions[0]);
 	const allSessions = $derived(
 		teacherFlow.snapshot.sessions.filter(
 			(session) =>
@@ -138,23 +131,6 @@
 				<p class="quiet-note">Aucune décision en attente de planification.</p>
 			{/if}
 		</section>
-
-		{#if teacherFlow.workspaceId === PERSONAL_WORKSPACE_ID && activeCourse}
-			<section class="management-section" aria-labelledby="manage-title">
-				<div class="section-heading">
-					<div>
-						<p class="eyebrow">Contexte personnel</p>
-						<h2 id="manage-title">Cours et première séance</h2>
-					</div>
-				</div>
-				<div class="management-grid">
-					{#key activeCourse.id}<CourseForm current={activeCourse} />{/key}
-					{#key firstSession?.id ?? 'new-session'}
-						<SessionForm courses={activeCourses} current={firstSession} />
-					{/key}
-				</div>
-			</section>
-		{/if}
 
 		{#if teacherFlow.workspaceId === PERSONAL_WORKSPACE_ID}
 			<section

@@ -188,6 +188,46 @@ describe('TeacherFlowRepository', () => {
 		await database.close();
 	});
 
+	it('rolls back an import that fails after the replacement transaction has started', async () => {
+		const name = databaseName();
+		const repo = await openTeacherFlowRepository('personal', {
+			databaseName: name,
+			migrateLegacy: false,
+			afterImportClear: () => {
+				throw new Error('forced failure after import clear');
+			}
+		});
+		await repo.replaceWorkspace({
+			workspaceId: 'personal',
+			courses: [course()],
+			sessions: [session()],
+			observations: [observation()],
+			decisions: [decision()]
+		});
+		const before = await repo.load();
+
+		await expect(
+			repo.importPersonalWorkspace(
+				{
+					workspaceId: 'personal',
+					courses: [{ ...course(), id: 'replacement', name: 'Sciences' }],
+					sessions: [],
+					observations: [],
+					decisions: []
+				},
+				'1.0.0'
+			)
+		).rejects.toThrow('forced failure after import clear');
+		expect(await repo.load()).toEqual(before);
+
+		const database = new (
+			await import('../../../src/lib/teacherflow/data/database')
+		).TeacherFlowDatabase(name);
+		await database.open();
+		expect(await database.recoveryBackups.where('workspaceId').equals('personal').count()).toBe(0);
+		await database.close();
+	});
+
 	it('clears observations with their decisions, preserves external decisions by clearing their target, and reset prevents legacy reimport', async () => {
 		const name = databaseName();
 		const storage = {
@@ -273,6 +313,102 @@ describe('TeacherFlowRepository', () => {
 			'forced linked-write failure'
 		);
 		expect(await repo.load()).toEqual(before);
+	});
+
+	it('edits an observation without a decision as a single atomic write', async () => {
+		const repo = await openTeacherFlowRepository('personal', {
+			databaseName: databaseName(),
+			migrateLegacy: false,
+			afterLinkedWrite: () => {
+				throw new Error('a second linked write must not run');
+			}
+		});
+		await repo.replaceWorkspace({
+			workspaceId: 'personal',
+			courses: [course()],
+			sessions: [session()],
+			observations: [observation()],
+			decisions: []
+		});
+
+		const result = await repo.editObservationWithDecision({
+			observationId: 'observation',
+			expectedObservationUpdatedAt: now,
+			observation: {
+				workspaceId: 'personal',
+				sessionId: 'session',
+				signal: 'keep',
+				note: 'Le vocabulaire est désormais maîtrisé.'
+			},
+			now: () => new Date('2026-08-15T09:00:01.000Z')
+		});
+
+		expect(result).not.toHaveProperty('decision');
+		expect(await repo.load()).toMatchObject({
+			observations: [
+				{
+					id: 'observation',
+					signal: 'keep',
+					note: 'Le vocabulaire est désormais maîtrisé.',
+					updatedAt: '2026-08-15T09:00:01.000Z'
+				}
+			],
+			decisions: []
+		});
+	});
+
+	it('keeps the personal export marker and detects deletion, import, and reset mutations', async () => {
+		const name = databaseName();
+		const repo = await openTeacherFlowRepository('personal', {
+			databaseName: name,
+			migrateLegacy: false
+		});
+		await repo.putCourse(course());
+		const firstExport = '2026-08-15T09:05:00.000Z';
+		await repo.markPersonalExportedAt(firstExport);
+		expect(await repo.lastPersonalExportedAt()).toBe(firstExport);
+		expect(await repo.hasPersonalChangesSinceLastExport()).toBe(false);
+
+		await repo.deleteCourse('course');
+		expect(await repo.lastPersonalExportedAt()).toBe(firstExport);
+		expect(await repo.hasPersonalChangesSinceLastExport()).toBe(true);
+
+		const secondExport = '2026-08-15T09:10:00.000Z';
+		await repo.markPersonalExportedAt(secondExport);
+		expect(await repo.hasPersonalChangesSinceLastExport()).toBe(false);
+		await repo.importPersonalWorkspace(
+			{
+				workspaceId: 'personal',
+				courses: [course()],
+				sessions: [],
+				observations: [],
+				decisions: []
+			},
+			'1.0.0'
+		);
+		expect(await repo.hasPersonalChangesSinceLastExport()).toBe(true);
+
+		const thirdExport = '2026-08-15T09:15:00.000Z';
+		await repo.markPersonalExportedAt(thirdExport);
+		await repo.clearWorkspace();
+		expect(await repo.lastPersonalExportedAt()).toBe(thirdExport);
+		expect(await repo.hasPersonalChangesSinceLastExport()).toBe(true);
+		const restored = {
+			workspaceId: 'personal' as const,
+			courses: [course()],
+			sessions: [session()],
+			observations: [observation()],
+			decisions: [decision()]
+		};
+		await repo.importPersonalWorkspace(restored, '1.0.0');
+		expect(await repo.load()).toEqual(restored);
+
+		const demo = await openTeacherFlowRepository('demo', {
+			databaseName: name,
+			migrateLegacy: false
+		});
+		expect(await demo.lastPersonalExportedAt()).toBeUndefined();
+		expect(await demo.hasPersonalChangesSinceLastExport()).toBe(false);
 	});
 
 	it('seeds a new demo once and preserves a deliberately cleared demo on reopening', async () => {
