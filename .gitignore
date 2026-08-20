@@ -14,9 +14,12 @@ Thumbs.db
 
 # Local diagnostics
 .playwright-cli/
+test-results/
 .dev-*.log
 /tmp
 /output
+/.worktrees/
+.superpowers/sdd/
 
 # Env
 .env

@@ -8,17 +8,26 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"test:unit": "node scripts/quality.mjs unit",
+		"test:integration": "node scripts/quality.mjs integration",
+		"test:e2e": "node node_modules/@playwright/test/cli.js test",
+		"check": "node scripts/quality.mjs check",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"lint": "prettier --check .",
+		"lint:teacherflow": "node scripts/quality.mjs lint",
+		"build:pages": "node scripts/quality.mjs build-pages",
 		"format": "prettier --write ."
 	},
 	"devDependencies": {
+		"@axe-core/playwright": "^4.13.0",
+		"@playwright/test": "^1.62.1",
 		"@sveltejs/adapter-static": "^3.0.10",
 		"@sveltejs/kit": "^2.50.2",
 		"@sveltejs/vite-plugin-svelte": "^6.2.4",
 		"@tailwindcss/vite": "^4.1.18",
 		"@types/node": "^22",
+		"@vitest/coverage-v8": "^4.1.10",
+		"fake-indexeddb": "^6.2.5",
 		"prettier": "^3.8.1",
 		"prettier-plugin-svelte": "^3.4.1",
 		"prettier-plugin-tailwindcss": "^0.7.2",
@@ -26,7 +35,8 @@
 		"svelte-check": "^4.4.2",
 		"tailwindcss": "^4.1.18",
 		"typescript": "^5.9.3",
-		"vite": "^7.3.1"
+		"vite": "^7.3.1",
+		"vitest": "^4.1.10"
 	},
 	"dependencies": {
 		"@supabase/supabase-js": "^2.100.1",

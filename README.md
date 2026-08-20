@@ -3,48 +3,49 @@
 ![Licence](https://img.shields.io/github/license/Amoradvisory/FlowPilot)
 ![Dernier commit](https://img.shields.io/github/last-commit/Amoradvisory/FlowPilot)
 
-## TeacherFlow — démonstrateur public
+## TeacherFlow — démonstrateur public fonctionnel
 
-**[Tester TeacherFlow](https://amoradvisory.github.io/FlowPilot/teacher/)** · [Lire l’étude de cas](TEACHERFLOW.md) · [Examiner la pull request](https://github.com/Amoradvisory/FlowPilot/pull/1)
+**[Tester TeacherFlow](https://amoradvisory.github.io/FlowPilot/teacher/)** · [Lire l’étude de cas](TEACHERFLOW.md)
 
-TeacherFlow adapte la base local-first de FlowPilot à une boucle de travail pédagogique :
+TeacherFlow transforme une observation post-cours en décision pédagogique explicite :
 
 **PRÉPARER → ENSEIGNER → OBSERVER → CAPITALISER → AMÉLIORER**
 
-La démonstration permet de saisir un retour post-cours fictif, de le conserver uniquement dans le navigateur et de le transformer en prochaine action. Elle ne contient aucune donnée réelle d’élève, ne mobilise aucun service d’IA externe et n’est pas présentée comme un produit institutionnel.
+Le visiteur peut explorer un scénario fictif ou commencer dans un espace personnel local, créer ses cours et séances, enregistrer une observation avec sa décision, retrouver cette mémoire, puis exporter ou restaurer ses données. Le parcours n’utilise aucune donnée réelle d’élève, aucun compte et aucun service d’IA externe.
 
-## Description
+Le code de la version publique est identifiable dans [`src/routes/(teacher)/teacher`](<src/routes/(teacher)/teacher>) et [`src/lib/teacherflow`](src/lib/teacherflow).
 
-FlowPilot est une application web de productivité personnelle **local-first** (PWA installable), construite avec SvelteKit. Les données restent sur l'appareil ; l'application fonctionne hors-ligne grâce à un service worker.
+### Statut honnête
 
-## Fonctionnalités (modules présents dans le code)
+TeacherFlow est un **démonstrateur public fonctionnel**. Ce n’est ni un produit institutionnel, ni un pilote terrain, ni un déploiement multi-utilisateur. Aucune capacité PWA ou hors ligne n’est revendiquée pour TeacherFlow.
 
-- **Agenda** — organisation des journées
-- **Focus** — sessions de concentration
-- **Habitudes** — suivi d'habitudes
-- **Collections** — listes et regroupements personnels
-- **Analytics** — statistiques d'usage personnelles
-- **Clarify** — clarification des tâches entrantes
+## FlowPilot — base historique
+
+FlowPilot est le prototype personnel local-first dont certaines fondations ont été réemployées pour TeacherFlow. Ses modules historiques de productivité restent dans le dépôt, isolés de la route publique TeacherFlow.
+
+La base historique comprend un manifest et un service worker. Cette propriété ne constitue pas une promesse PWA ou hors ligne pour TeacherFlow.
 
 ## Stack technique
 
 - [SvelteKit 2](https://kit.svelte.dev/) + Svelte 5 (adapter-static)
-- [Tailwind CSS 4](https://tailwindcss.com/)
-- TypeScript · Vite · PWA (service worker)
+- TypeScript · Vite · IndexedDB via Dexie
+- Vitest · Playwright
 
-## Installation et lancement
+## Installation et vérification
 
 ```bash
 git clone https://github.com/Amoradvisory/FlowPilot.git
 cd FlowPilot
 npm ci
-npm run dev      # développement
-npm run build    # build de production
+npm run test:unit
+npm run test:integration
+npm run check
+npm run lint:teacherflow
+npm run build:pages
+npm run test:e2e -- --project=chromium --project=webkit
 ```
 
-## Statut du projet
-
-FlowPilot reste un prototype personnel actif. TeacherFlow est une branche de démonstration publique destinée à éprouver la transférabilité de son architecture dans un contexte pédagogique.
+Le workflow GitHub Actions applique ces contrôles sur les pull requests. Après fusion dans `main`, le même pipeline construit puis déploie l’artefact vérifié sur GitHub Pages.
 
 ## Licence
 
